@@ -24,10 +24,6 @@ class MemoryCache {
   async put(requestKey, responseData) {
     this.cache.set(requestKey, responseData);
   }
-
-  cleanup() {
-    // NodeCache يقوم بالتنظيف تلقائياً
-  }
 }
 
 // ==========================================================
@@ -55,13 +51,7 @@ const rateLimiter = rateLimit({
   }
 });
 
-// ==========================================================
-// 🌐 متغيرات البيئة
-// ==========================================================
-const SUPABASE_URL = process.env.SUPABASE_URL || "https://qfcsaiyuyxhibidrrmha.supabase.co";
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
-
-// إنشاء مثيلات
+// إنشاء مثيل الكاش
 const cache = new MemoryCache();
 
 console.log('🚀 جاري تشغيل الخادم...');
@@ -278,69 +268,13 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🛡️ [المستوى 2] قراءة من Supabase
+    // 🌐 [المستوى 2] جلب مباشر فقط
     // ==========================================================
-    if (SUPABASE_ANON_KEY) {
-      try {
-        console.log(`🔎 البحث في Supabase عن: ${databasePhone}`);
-        
-        const dbResponse = await fetch(
-          `${SUPABASE_URL}/rest/v1/numbers?phone=eq.${databasePhone}&select=*`,
-          {
-            headers: {
-              'apikey': SUPABASE_ANON_KEY,
-              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-            }
-          }
-        );
-
-        if (dbResponse.ok) {
-          const existingRecords = await dbResponse.json();
-          if (existingRecords && existingRecords.length > 0) {
-            console.log(`✅ تم العثور على الرقم في Supabase!`);
-            
-            const results = existingRecords.map((rec) => {
-              const name = rec.name || rec.contact_name || rec.full_name || rec.username || 'اسم غير معروف';
-              const phone = rec.phone || rec.phone_number || databasePhone;
-              const src = rec.source || rec.data_source || 'قاعدة البيانات';
-              const prov = rec.provider || rec.telecom || provider;
-              const date = rec.created_at || rec.added_at || new Date().toISOString();
-
-              return {
-                name: name,
-                phone: phone,
-                source: src,
-                provider: prov,
-                formattedDate: new Date(date).toLocaleDateString('ar-EG')
-              };
-            });
-
-            const finalResponseData = {
-              success: true,
-              results,
-              total: results.length,
-              source: 'supabase_cache',
-              cached_at: new Date().toISOString()
-            };
-
-            await cache.put(cacheKey, finalResponseData);
-            return res.status(200).json(finalResponseData);
-          }
-        }
-      } catch (dbErr) {
-        console.error('❌ خطأ في Supabase:', dbErr);
-      }
-    }
-
-    // ==========================================================
-    // 🌐 [المستوى 3] جلب مباشر (بدون Firecrawl)
-    // ==========================================================
-    console.log('🔄 جلب مباشر...');
+    console.log(`🔄 جلب بيانات الرقم: ${scrapePhone}`);
     let names = [];
     let success = false;
     let lastError = null;
     let source = '';
-    let rawData = null;
 
     try {
       const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
@@ -353,8 +287,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
           'Accept': 'application/json, text/html, */*',
           'Accept-Language': 'ar,en;q=0.9',
           'Referer': 'https://b.raw2fid.net/'
-        },
-        timeout: 15000
+        }
       });
       
       if (response.ok) {
@@ -362,13 +295,12 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         
         if (contentType.includes('application/json')) {
           const jsonData = await response.json();
-          rawData = jsonData;
           const extractedNames = extractNamesFromJSON(jsonData);
           if (extractedNames.length > 0) {
             names = extractedNames;
             success = true;
             source = 'direct_json';
-            console.log(`✅ استخراج ${names.length} اسم من JSON مباشر`);
+            console.log(`✅ استخراج ${names.length} اسم من JSON`);
           }
         } else {
           const htmlContent = await response.text();
@@ -377,8 +309,8 @@ app.all('/api/search', rateLimiter, async (req, res) => {
             if (extractedNames.length > 0) {
               names = extractedNames;
               success = true;
-              source = 'direct_scrape';
-              console.log(`✅ استخراج ${names.length} اسم من HTML مباشر`);
+              source = 'direct_html';
+              console.log(`✅ استخراج ${names.length} اسم من HTML`);
             } else {
               const alternativeNames = extractNamesAlternative(htmlContent);
               if (alternativeNames.length > 0) {
@@ -391,11 +323,11 @@ app.all('/api/search', rateLimiter, async (req, res) => {
           }
         }
       } else {
-        console.log(`⚠️ فشل الجلب المباشر: ${response.status}`);
+        console.log(`⚠️ فشل الجلب: ${response.status}`);
         lastError = `HTTP ${response.status}`;
       }
     } catch (e) {
-      console.log(`⚠️ فشل الجلب المباشر: ${e.message}`);
+      console.log(`⚠️ خطأ في الجلب: ${e.message}`);
       lastError = e.message;
     }
 
@@ -410,17 +342,16 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         error: lastError || 'لم يتم العثور على نتائج',
         debug: {
           phone: scrapePhone,
-          provider: provider,
-          source: source
+          provider: provider
         }
       });
     }
 
-    // --- 4. تجهيز النتيجة ---
+    // --- 3. تجهيز النتيجة ---
     const results = names.map(name => ({
       name: name,
       phone: databasePhone,
-      source: source.includes('direct') ? 'مباشر' : 'مصدر آخر',
+      source: 'جلب مباشر',
       provider: provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
@@ -453,5 +384,5 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 // ==========================================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 تشغيل خادم Node.js على المنفذ ${PORT}`);
-  console.log(`📌 جاهز للاستقبال طلبات البحث`);
+  console.log('📌 جاهز للاستقبال طلبات البحث (جلب مباشر فقط)');
 });
