@@ -60,13 +60,11 @@ const rateLimiter = rateLimit({
 // ==========================================================
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://qfcsaiyuyxhibidrrmha.supabase.co";
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
-const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY || "fc-b11dd2129b814b3a91ed3903d3b1c8fd";
 
 // إنشاء مثيلات
 const cache = new MemoryCache();
 
 console.log('🚀 جاري تشغيل الخادم...');
-console.log(`🔥 Firecrawl API Key: ${FIRECRAWL_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
 
 // ==========================================================
 // 🚀 Middleware
@@ -87,9 +85,11 @@ function extractNamesFromJSON(jsonData) {
   const names = [];
   
   try {
+    // محاولة استخراج من حقل result
     if (jsonData.result) {
       const text = jsonData.result;
       
+      // البحث عن اسم الشهرة
       const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
       if (fameMatch) {
         let name = fameMatch[1].trim();
@@ -99,6 +99,7 @@ function extractNamesFromJSON(jsonData) {
         }
       }
       
+      // البحث عن أسماء مرقمة
       const numberedMatches = text.match(/\d+\s*[-–—]\s*([^\d\n]+)/g);
       if (numberedMatches) {
         numberedMatches.forEach(m => {
@@ -113,6 +114,7 @@ function extractNamesFromJSON(jsonData) {
         });
       }
       
+      // البحث عن أسماء عربية
       const arabicPattern = /[\u0600-\u06FF]{3,}(?:\s+[\u0600-\u06FF]{3,}){0,3}/g;
       let arabicMatch;
       while ((arabicMatch = arabicPattern.exec(text)) !== null) {
@@ -122,6 +124,19 @@ function extractNamesFromJSON(jsonData) {
           names.push(name);
         }
       }
+    }
+    
+    // محاولة استخراج من حقول أخرى
+    if (jsonData.data && Array.isArray(jsonData.data)) {
+      jsonData.data.forEach(item => {
+        if (item.name || item.full_name || item.username) {
+          let name = item.name || item.full_name || item.username;
+          name = cleanExtractedName(name);
+          if (name && name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
+            names.push(name);
+          }
+        }
+      });
     }
   } catch (e) {
     console.error('خطأ في استخراج الأسماء من JSON:', e);
@@ -135,6 +150,7 @@ function extractNamesFromJSON(jsonData) {
 function extractNamesFromResponse(html) {
   const names = [];
   
+  // البحث عن أسماء مرقمة
   const numberedPattern = /(\d+)\s*[-–—]\s*([^\d\n<]+)/g;
   let match;
   while ((match = numberedPattern.exec(html)) !== null) {
@@ -145,6 +161,7 @@ function extractNamesFromResponse(html) {
     }
   }
   
+  // البحث عن أسماء عربية
   const arabicNamePattern = /[\u0600-\u06FF]{3,}(?:\s+[\u0600-\u06FF]{3,}){0,3}/g;
   let arabicMatch;
   while ((arabicMatch = arabicNamePattern.exec(html)) !== null) {
@@ -155,6 +172,7 @@ function extractNamesFromResponse(html) {
     }
   }
   
+  // البحث عن علامات الاسم
   const nameTags = /<[^>]*name[^>]*>([^<]+)<\/[^>]*>/gi;
   let tagMatch;
   while ((tagMatch = nameTags.exec(html)) !== null) {
@@ -173,6 +191,7 @@ function extractNamesAlternative(html) {
   
   const textContent = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
   
+  // البحث عن أسماء عربية في النص
   const arabicPattern = /[\u0600-\u06FF]{3,}(?:\s+[\u0600-\u06FF]{3,}){0,2}/g;
   let match;
   while ((match = arabicPattern.exec(textContent)) !== null) {
@@ -183,6 +202,7 @@ function extractNamesAlternative(html) {
     }
   }
   
+  // البحث عن كلمات مفتاحية
   const keywords = ['اسم', 'الاسم', 'name', 'user', 'contact', 'صاحب', 'مالك', 'الشهرة', 'المستخدم', 'العميل'];
   for (const keyword of keywords) {
     const regex = new RegExp(`${keyword}[\\s:]*([^\\n<,]+)`, 'gi');
@@ -196,6 +216,7 @@ function extractNamesAlternative(html) {
     }
   }
   
+  // البحث عن أسماء بعد أرقام
   const pattern = /\d+[\s-]+([\u0600-\u06FF\s]+)/g;
   let patternMatch;
   while ((patternMatch = pattern.exec(textContent)) !== null) {
@@ -282,6 +303,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     // ==========================================================
     // 🛡️ [المستوى 2] قراءة من Supabase
     // ==========================================================
+    let supabaseData = null;
     if (SUPABASE_ANON_KEY) {
       try {
         console.log(`🔎 البحث في Supabase عن: ${databasePhone}`);
@@ -300,33 +322,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
           const existingRecords = await dbResponse.json();
           if (existingRecords && existingRecords.length > 0) {
             console.log(`✅ تم العثور على الرقم في Supabase!`);
-            
-            const results = existingRecords.map((rec) => {
-              const name = rec.name || rec.contact_name || rec.full_name || rec.username || 'اسم غير معروف';
-              const phone = rec.phone || rec.phone_number || databasePhone;
-              const src = rec.source || rec.data_source || 'قاعدة البيانات';
-              const prov = rec.provider || rec.telecom || provider;
-              const date = rec.created_at || rec.added_at || new Date().toISOString();
-
-              return {
-                name: name,
-                phone: phone,
-                source: src,
-                provider: prov,
-                formattedDate: new Date(date).toLocaleDateString('ar-EG')
-              };
-            });
-
-            const finalResponseData = {
-              success: true,
-              results,
-              total: results.length,
-              source: 'supabase_cache',
-              cached_at: new Date().toISOString()
-            };
-
-            await cache.put(cacheKey, finalResponseData);
-            return res.status(200).json(finalResponseData);
+            supabaseData = existingRecords;
           }
         }
       } catch (dbErr) {
@@ -335,169 +331,140 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🌐 [المستوى 3] جلب عبر Firecrawl 🔥
+    // 🌐 [المستوى 3] جلب من https://b.raw2fid.net
     // ==========================================================
     let names = [];
     let success = false;
     let lastError = null;
     let source = '';
-    let rawData = null;
 
-    if (FIRECRAWL_API_KEY) {
-      console.log('🔥 استخدام Firecrawl...');
+    console.log(`🔄 جلب البيانات من: https://b.raw2fid.net للرقم: ${scrapePhone}`);
+    
+    try {
+      const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
       
-      try {
-        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
-        console.log(`📡 جلب البيانات من: ${targetUrl}`);
+      const response = await fetch(targetUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json, text/html, */*',
+          'Accept-Language': 'ar,en;q=0.9',
+          'Referer': 'https://b.raw2fid.net/'
+        }
+      });
+      
+      if (response.ok) {
+        const contentType = response.headers.get('content-type') || '';
         
-        const response = await fetch('https://api.firecrawl.dev/v2/scrape', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${FIRECRAWL_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            url: targetUrl,
-            formats: ['json', 'html'],
-            waitFor: 5000,
-            timeout: 30000
-          })
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          rawData = data;
-          console.log('✅ استجابة Firecrawl مستلمة');
-          
-          if (data.data && data.data.json) {
-            const extractedNames = extractNamesFromJSON(data.data.json);
+        if (contentType.includes('application/json')) {
+          const jsonData = await response.json();
+          const extractedNames = extractNamesFromJSON(jsonData);
+          if (extractedNames.length > 0) {
+            names = extractedNames;
+            success = true;
+            source = 'raw2fid_json';
+            console.log(`✅ استخراج ${names.length} اسم من JSON من raw2fid`);
+          }
+        } else {
+          const htmlContent = await response.text();
+          if (htmlContent && htmlContent.length >= 50) {
+            const extractedNames = extractNamesFromResponse(htmlContent);
             if (extractedNames.length > 0) {
               names = extractedNames;
               success = true;
-              source = 'firecrawl_json';
-              console.log(`✅ استخراج ${names.length} اسم من JSON`);
-            }
-          }
-          
-          if (!success || names.length === 0) {
-            const htmlContent = data.data?.html || data.html || data.content || '';
-            if (htmlContent && htmlContent.length >= 50) {
-              const extractedNames = extractNamesFromResponse(htmlContent);
-              if (extractedNames.length > 0) {
-                names = extractedNames;
+              source = 'raw2fid_html';
+              console.log(`✅ استخراج ${names.length} اسم من HTML من raw2fid`);
+            } else {
+              const alternativeNames = extractNamesAlternative(htmlContent);
+              if (alternativeNames.length > 0) {
+                names = alternativeNames;
                 success = true;
-                source = 'firecrawl_html';
-                console.log(`✅ استخراج ${names.length} اسم من HTML`);
-              } else {
-                const alternativeNames = extractNamesAlternative(htmlContent);
-                if (alternativeNames.length > 0) {
-                  names = alternativeNames;
-                  success = true;
-                  source = 'firecrawl_alternative';
-                  console.log(`✅ استخراج ${names.length} اسم (طريقة بديلة)`);
-                }
+                source = 'raw2fid_alternative';
+                console.log(`✅ استخراج ${names.length} اسم (طريقة بديلة) من raw2fid`);
               }
             }
           }
-        } else {
-          const errorText = await response.text();
-          console.log(`⚠️ فشل Firecrawl: ${response.status} - ${errorText}`);
-          lastError = `Firecrawl error: ${response.status}`;
         }
-      } catch (e) {
-        console.error('❌ خطأ في Firecrawl:', e);
-        lastError = `Firecrawl exception: ${e.message}`;
+      } else {
+        lastError = `فشل الجلب من raw2fid: ${response.status}`;
+        console.log(`⚠️ فشل الجلب من raw2fid: ${response.status}`);
       }
-    } else {
-      console.log('⚠️ مفتاح Firecrawl غير موجود');
-      lastError = 'مفتاح Firecrawl غير موجود';
+    } catch (e) {
+      console.log(`⚠️ فشل الجلب من raw2fid: ${e.message}`);
+      lastError = `خطأ في الجلب من raw2fid: ${e.message}`;
     }
 
     // ==========================================================
-    // 🔄 المحاولة البديلة: جلب مباشر
+    // 📊 دمج النتائج من Supabase و raw2fid
     // ==========================================================
-    if (!success || names.length === 0) {
-      console.log('🔄 محاولة الجلب المباشر...');
-      
-      try {
-        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
-        
-        const response = await fetch(targetUrl, {
-          method: 'GET',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json, text/html, */*',
-            'Accept-Language': 'ar,en;q=0.9',
-            'Referer': 'https://b.raw2fid.net/'
-          }
-        });
-        
-        if (response.ok) {
-          const contentType = response.headers.get('content-type') || '';
-          
-          if (contentType.includes('application/json')) {
-            const jsonData = await response.json();
-            rawData = jsonData;
-            const extractedNames = extractNamesFromJSON(jsonData);
-            if (extractedNames.length > 0) {
-              names = extractedNames;
-              success = true;
-              source = 'direct_json';
-              console.log(`✅ استخراج ${names.length} اسم من JSON مباشر`);
-            }
-          } else {
-            const htmlContent = await response.text();
-            if (htmlContent && htmlContent.length >= 50) {
-              const extractedNames = extractNamesFromResponse(htmlContent);
-              if (extractedNames.length > 0) {
-                names = extractedNames;
-                success = true;
-                source = 'direct_scrape';
-                console.log(`✅ استخراج ${names.length} اسم من HTML مباشر`);
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.log(`⚠️ فشل الجلب المباشر: ${e.message}`);
-      }
+    let results = [];
+    
+    // إضافة نتائج Supabase
+    if (supabaseData && supabaseData.length > 0) {
+      const supabaseResults = supabaseData.map((rec) => {
+        const name = rec.name || rec.contact_name || rec.full_name || rec.username || 'اسم غير معروف';
+        const phone = rec.phone || rec.phone_number || databasePhone;
+        const src = rec.source || rec.data_source || 'قاعدة البيانات';
+        const prov = rec.provider || rec.telecom || provider;
+        const date = rec.created_at || rec.added_at || new Date().toISOString();
+
+        return {
+          name: name,
+          phone: phone,
+          source: src,
+          provider: prov,
+          formattedDate: new Date(date).toLocaleDateString('ar-EG')
+        };
+      });
+      results = results.concat(supabaseResults);
+    }
+    
+    // إضافة نتائج raw2fid
+    if (success && names.length > 0) {
+      const rawResults = names.map(name => ({
+        name: name,
+        phone: databasePhone,
+        source: 'raw2fid.net',
+        provider: provider,
+        formattedDate: new Date().toLocaleDateString('ar-EG')
+      }));
+      results = results.concat(rawResults);
     }
 
     // ==========================================================
     // 📊 إذا لم يتم العثور على نتائج
     // ==========================================================
-    if (!success || names.length === 0) {
+    if (results.length === 0) {
       return res.status(200).json({
         success: false,
         results: [],
         total: 0,
-        error: lastError || 'لم يتم العثور على نتائج',
+        error: lastError || 'لم يتم العثور على نتائج في أي مصدر',
         debug: {
           phone: scrapePhone,
           provider: provider,
-          has_firecrawl_key: !!FIRECRAWL_API_KEY,
+          supabase_found: !!supabaseData,
+          raw2fid_found: success,
           source: source
         }
       });
     }
 
-    // --- 4. تجهيز النتيجة ---
-    const results = names.map(name => ({
-      name: name,
-      phone: databasePhone,
-      source: source.includes('firecrawl') ? 'Firecrawl' : 'مباشر',
-      provider: provider,
-      formattedDate: new Date().toLocaleDateString('ar-EG')
-    }));
-
+    // ==========================================================
+    // ✅ تجهيز النتيجة النهائية
+    // ==========================================================
     const finalResponseData = {
       success: true,
-      results,
+      results: results,
       total: results.length,
-      source: source,
+      sources: {
+        supabase: !!supabaseData ? supabaseData.length : 0,
+        raw2fid: success ? names.length : 0
+      },
       cached_at: new Date().toISOString()
     };
 
+    // حفظ في الكاش
     await cache.put(cacheKey, finalResponseData);
     return res.status(200).json(finalResponseData);
 
@@ -518,6 +485,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 // ==========================================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 تشغيل خادم Node.js على المنفذ ${PORT}`);
-  console.log(`🔥 Firecrawl API Key: ${FIRECRAWL_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
-  console.log(`🔑 المفتاح: ${FIRECRAWL_API_KEY ? FIRECRAWL_API_KEY.substring(0, 15) + '...' : 'غير موجود'}`);
+  console.log(`📡 المصادر المتاحة:`);
+  console.log(`  - Supabase: ${SUPABASE_ANON_KEY ? '✅ متاح' : '❌ غير متاح'}`);
+  console.log(`  - raw2fid.net: ✅ متاح`);
 });
