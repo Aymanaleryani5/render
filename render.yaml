@@ -1,14 +1,1 @@
-services:
-  - type: web
-    name: phone-lookup-api
-    runtime: node
-    plan: free
-    buildCommand: npm install
-    startCommand: node server.js
-    envVars:
-      - key: SUPABASE_URL
-        value: https://qfcsaiyuyxhibidrrmha.supabase.co
-      - key: SUPABASE_ANON_KEY
-        sync: false
-      - key: PORT
-        value: 3000
+
