@@ -6,7 +6,9 @@ services:
     buildCommand: npm install
     startCommand: node server.js
     envVars:
-      - key: FIRECRAWL_API_KEY
-        value: fc-b11dd2129b814b3a91ed3903d3b1c8fd
       - key: PORT
         value: 3000
+      - key: SUPABASE_URL
+        value: https://qfcsaiyuyxhibidrrmha.supabase.co
+      - key: SUPABASE_ANON_KEY
+        value: your_supabase_anon_key_here
