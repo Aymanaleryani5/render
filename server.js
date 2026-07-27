@@ -56,11 +56,11 @@ const rateLimiter = rateLimit({
 });
 
 // ==========================================================
-// 🌐 متغيرات البيئة
+// 🌐 متغيرات البيئة ومفتاح Firecrawl الثابت في الكود
 // ==========================================================
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://qfcsaiyuyxhibidrrmha.supabase.co";
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
-const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY || "fc-2435904f725c4e44aca33b96673f05f2";
+const FIRECRAWL_API_KEY = "fc-2435904f725c4e44aca33b96673f05f2";
 
 // إنشاء مثيلات
 const cache = new MemoryCache();
@@ -234,7 +234,6 @@ function detectProvider(cleanPhone) {
 // ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
-    // --- 1. جلب معلمة البحث ---
     let query = null;
     if (req.method === 'GET') {
       query = req.query.query;
@@ -251,7 +250,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       });
     }
 
-    // --- 2. تنظيف رقم الهاتف ---
     let cleanPhone = query.trim().replace(/\s+/g, '').replace(/[-()]/g, '');
     if (cleanPhone.startsWith('00')) cleanPhone = cleanPhone.substring(2);
     else if (cleanPhone.startsWith('0')) cleanPhone = cleanPhone.substring(1);
