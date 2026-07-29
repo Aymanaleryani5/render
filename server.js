@@ -10,9 +10,12 @@ const PORT = process.env.PORT || 3000;
 // ==========================================================
 // 📊 نظام الكاش (Memory Cache)
 // ==========================================================
+
 class MemoryCache {
   constructor() {
-    this.cache = new NodeCache({ stdTTL: 86400, checkperiod: 600 }); // 24 ساعة
+    // stdTTL: 2592000 (30 يومًا بالثواني)
+    // checkperiod: 86400 (فحص وتنظيف الكاش المنتهي يومياً)
+    this.cache = new NodeCache({ stdTTL: 2592000, checkperiod: 86400 });
   }
 
   async match(requestKey) {
@@ -29,6 +32,7 @@ class MemoryCache {
     // NodeCache يقوم بالتنظيف تلقائياً
   }
 }
+
 
 // ==========================================================
 // 📊 نظام تحديد المعدل (Rate Limiting)
