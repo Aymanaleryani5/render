@@ -64,7 +64,7 @@ const rateLimiter = rateLimit({
 // ==========================================================
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://qfcsaiyuyxhibidrrmha.supabase.co";
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
-const FIRECRAWL_API_KEY = "fc-6ffedde65f7d4683be7c6b448e6f0d5b";
+const FIRECRAWL_API_KEY = "fc-967375ec487d45b1ab9dc63037c79b78";
 
 // إنشاء مثيلات
 const cache = new MemoryCache();
