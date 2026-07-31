@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const NodeCache = require('node-cache');
-const rateLimit = require('express-rate-limit');
+const { rateLimit } = require('express-rate-limit');
 require('dotenv').config();
 
 const app = express();
@@ -34,24 +34,22 @@ class MemoryCache {
 }
 
 // ==========================================================
-// 📊 نظام تحديد المعدل (Rate Limiting)
+// 📊 نظام تحديد المعدل (Rate Limiting) - متوافق مع الإصدار 7.x
 // ==========================================================
 const rateLimiter = rateLimit({
-  windowMs: 3 * 1000,
-  max: 1,
-  message: JSON.stringify({
+  windowMs: 3 * 1000, // 3 ثواني
+  limit: 1, // طلب واحد لكل IP (في express-rate-limit v7 يتم استخدام limit بدلاً من max)
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
     success: false,
     results: [],
     total: 0,
     error: 'مهلاً! الرجاء الانتظار',
     message: '⏳ يرجى الانتظار 3 ثواني بين عمليات البحث'
-  }),
+  },
   keyGenerator: (req) => {
     return req.ip || 'anonymous';
-  },
-  handler: (req, res) => {
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.status(429).json(JSON.parse(rateLimiter.message));
   }
 });
 
@@ -263,7 +261,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🛡️ [المستوى 2] قراءة من Supabase
+    // 🛡️ [المستوى 2] قراءة من Supabase (استخدام fetch المدمج في Node 18+)
     // ==========================================================
     if (SUPABASE_ANON_KEY) {
       try {
@@ -319,7 +317,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🌐 [المستوى 3] الجلب عبر البروكسي المجاني (بدون مكتبات)
+    // 🌐 [المستوى 3] الجلب المباشر عبر البوابة
     // ==========================================================
     let names = [];
     let success = false;
@@ -331,7 +329,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     try {
       const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
       
-      // التخفي والتمرير لتخطي حظر Cloudflare و Render IP
       const proxyGateways = [
         `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
         `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`
@@ -355,7 +352,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       if (response && response.ok) {
         const textData = await response.text();
         
-        // محاولة التحليل كـ JSON أولاً
         try {
           const jsonData = JSON.parse(textData);
           const extractedNames = extractNamesFromJSON(jsonData);
@@ -366,7 +362,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
             console.log(`✅ استخراج ${names.length} اسم من JSON بنجاح`);
           }
         } catch (e) {
-          // التحليل كـ HTML إذا لم يكن JSON
           if (textData && textData.length >= 50) {
             const extractedNames = extractNamesFromResponse(textData);
             if (extractedNames.length > 0) {
