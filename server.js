@@ -38,7 +38,7 @@ class MemoryCache {
 // ==========================================================
 const rateLimiter = rateLimit({
   windowMs: 3 * 1000, // 3 ثواني
-  limit: 1, // طلب واحد لكل IP (في express-rate-limit v7 يتم استخدام limit بدلاً من max)
+  limit: 1, // طلب واحد لكل IP
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -212,6 +212,36 @@ function detectProvider(cleanPhone) {
   return 'رقم دولي';
 }
 
+// دالة مساعدة معالجة الاستجابة
+function parseResponseText(textData) {
+  let names = [];
+  let source = '';
+
+  try {
+    const jsonData = JSON.parse(textData);
+    const extracted = extractNamesFromJSON(jsonData);
+    if (extracted.length > 0) {
+      names = extracted;
+      source = 'json';
+    }
+  } catch (e) {
+    if (textData && textData.length >= 20) {
+      const extracted = extractNamesFromResponse(textData);
+      if (extracted.length > 0) {
+        names = extracted;
+        source = 'html';
+      } else {
+        const altExtracted = extractNamesAlternative(textData);
+        if (altExtracted.length > 0) {
+          names = altExtracted;
+          source = 'alternative';
+        }
+      }
+    }
+  }
+  return { names, source };
+}
+
 // ==========================================================
 // 🚀 Endpoint الرئيسي
 // ==========================================================
@@ -261,7 +291,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🛡️ [المستوى 2] قراءة من Supabase (استخدام fetch المدمج في Node 18+)
+    // 🛡️ [المستوى 2] قراءة من Supabase
     // ==========================================================
     if (SUPABASE_ANON_KEY) {
       try {
@@ -317,75 +347,73 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🌐 [المستوى 3] الجلب المباشر عبر البوابة
+    // 🌐 [المستوى 3] الجلب المباشر (دمج POST و GET)
     // ==========================================================
     let names = [];
     let success = false;
-    let lastError = null;
     let source = '';
+    const commonHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+      'X-Requested-With': 'XMLHttpRequest',
+      'Referer': 'https://b.raw2fid.net/',
+      'Origin': 'https://b.raw2fid.net',
+      'Accept': '*/*',
+      'Accept-Language': 'ar,en-US;q=0.9,en;q=0.8'
+    };
 
-    console.log('🔄 جاري الجلب المباشر عبر البوابة...');
-    
+    // 1️⃣ المحاولة الأولى: طلب POST
+    console.log(`📡 [المحاولة 1 - POST] جاري البحث عن: ${scrapePhone}`);
     try {
-      const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
-      
-      const proxyGateways = [
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
-        `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`
-      ];
+      const postUrl = 'https://b.raw2fid.net/wp-admin/admin-ajax.php';
+      const postResponse = await fetch(postUrl, {
+        method: 'POST',
+        headers: {
+          ...commonHeaders,
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+        },
+        body: new URLSearchParams({
+          'action': 'alosh_search',
+          'phone': scrapePhone
+        }).toString()
+      });
 
-      let response = null;
-      for (const proxyUrl of proxyGateways) {
-        try {
-          response = await fetch(proxyUrl, {
-            method: 'GET',
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-            }
-          });
-          if (response.ok) break;
-        } catch (err) {
-          console.log(`⚠️ البروكسي يفشل، التجربة على المنفذ التالي...`);
+      if (postResponse.ok) {
+        const textData = await postResponse.text();
+        const parsed = parseResponseText(textData);
+        if (parsed.names.length > 0) {
+          names = parsed.names;
+          success = true;
+          source = `direct_post_${parsed.source}`;
+          console.log(`✅ تم استخراج ${names.length} اسم عبر POST`);
         }
-      }
-
-      if (response && response.ok) {
-        const textData = await response.text();
-        
-        try {
-          const jsonData = JSON.parse(textData);
-          const extractedNames = extractNamesFromJSON(jsonData);
-          if (extractedNames.length > 0) {
-            names = extractedNames;
-            success = true;
-            source = 'direct_json';
-            console.log(`✅ استخراج ${names.length} اسم من JSON بنجاح`);
-          }
-        } catch (e) {
-          if (textData && textData.length >= 50) {
-            const extractedNames = extractNamesFromResponse(textData);
-            if (extractedNames.length > 0) {
-              names = extractedNames;
-              success = true;
-              source = 'direct_scrape';
-              console.log(`✅ استخراج ${names.length} اسم من HTML بنجاح`);
-            } else {
-              const alternativeNames = extractNamesAlternative(textData);
-              if (alternativeNames.length > 0) {
-                names = alternativeNames;
-                success = true;
-                source = 'direct_alternative';
-                console.log(`✅ استخراج ${names.length} اسم (طريقة بديلة)`);
-              }
-            }
-          }
-        }
-      } else {
-        lastError = `Proxy failed with status: ${response ? response.status : 'No response'}`;
       }
     } catch (e) {
-      console.log(`⚠️ فشل الجلب: ${e.message}`);
-      lastError = e.message;
+      console.log(`⚠️ فشل طلب POST: ${e.message}`);
+    }
+
+    // 2️⃣ المحاولة الثانية: طلب GET (إذا لم نجد نتائج عبر POST)
+    if (!success || names.length === 0) {
+      console.log(`📡 [المحاولة 2 - GET] جاري البحث عن: ${scrapePhone}`);
+      try {
+        const getUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
+        const getResponse = await fetch(getUrl, {
+          method: 'GET',
+          headers: commonHeaders
+        });
+
+        if (getResponse.ok) {
+          const textData = await getResponse.text();
+          const parsed = parseResponseText(textData);
+          if (parsed.names.length > 0) {
+            names = parsed.names;
+            success = true;
+            source = `direct_get_${parsed.source}`;
+            console.log(`✅ تم استخراج ${names.length} اسم عبر GET`);
+          }
+        }
+      } catch (e) {
+        console.log(`⚠️ فشل طلب GET: ${e.message}`);
+      }
     }
 
     // ==========================================================
@@ -396,11 +424,10 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         success: false,
         results: [],
         total: 0,
-        error: lastError || 'لم يتم العثور على نتائج',
+        error: 'لم يتم العثور على نتائج',
         debug: {
           phone: scrapePhone,
-          provider: provider,
-          source: source
+          provider: provider
         }
       });
     }
