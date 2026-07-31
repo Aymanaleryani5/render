@@ -8,13 +8,16 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ==========================================================
+// ⚙️ إعدادات Reverse Proxy (Render / Cloudflare / Nginx)
+// ==========================================================
+app.set('trust proxy', 1);
+
+// ==========================================================
 // 📊 نظام الكاش (Memory Cache)
 // ==========================================================
 
 class MemoryCache {
   constructor() {
-    // stdTTL: 2592000 (30 يومًا بالثواني)
-    // checkperiod: 86400 (فحص وتنظيف الكاش المنتهي يومياً)
     this.cache = new NodeCache({ stdTTL: 2592000, checkperiod: 86400 });
   }
 
@@ -33,7 +36,6 @@ class MemoryCache {
   }
 }
 
-
 // ==========================================================
 // 📊 نظام تحديد المعدل (Rate Limiting)
 // ==========================================================
@@ -48,10 +50,7 @@ const rateLimiter = rateLimit({
     message: '⏳ يرجى الانتظار 3 ثواني بين عمليات البحث'
   }),
   keyGenerator: (req) => {
-    return req.headers['cf-connecting-ip'] || 
-           req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
-           req.ip ||
-           'anonymous';
+    return req.ip || 'anonymous';
   },
   handler: (req, res) => {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -60,17 +59,14 @@ const rateLimiter = rateLimit({
 });
 
 // ==========================================================
-// 🌐 متغيرات البيئة ومفتاح Firecrawl الثابت في الكود
+// 🌐 متغيرات البيئة
 // ==========================================================
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://qfcsaiyuyxhibidrrmha.supabase.co";
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
-const FIRECRAWL_API_KEY = "fc-72e13b51534b49c2a7294dc16ccf479d";
 
-// إنشاء مثيلات
 const cache = new MemoryCache();
 
 console.log('🚀 جاري تشغيل الخادم...');
-console.log(`🔥 Firecrawl API Key: ${FIRECRAWL_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
 
 // ==========================================================
 // 🚀 Middleware
@@ -122,7 +118,7 @@ function extractNamesFromJSON(jsonData) {
       while ((arabicMatch = arabicPattern.exec(text)) !== null) {
         let name = arabicMatch[0];
         name = cleanExtractedName(name);
-        if (name.length > 2 && !names.includes(name) && !name.includes('ل') && !/^\+?\d+$/.test(name)) {
+        if (name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
           names.push(name);
         }
       }
@@ -154,7 +150,7 @@ function extractNamesFromResponse(html) {
   while ((arabicMatch = arabicNamePattern.exec(html)) !== null) {
     let name = arabicMatch[0];
     name = cleanExtractedName(name);
-    if (name.length > 2 && !names.includes(name) && !name.includes('ل') && !/^\+?\d+$/.test(name)) {
+    if (name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
       names.push(name);
     }
   }
@@ -182,7 +178,7 @@ function extractNamesAlternative(html) {
   while ((match = arabicPattern.exec(textContent)) !== null) {
     let name = match[0];
     name = cleanExtractedName(name);
-    if (name.length > 2 && !names.includes(name) && !name.includes('ل') && name.length < 30 && !/^\+?\d+$/.test(name)) {
+    if (name.length > 2 && !names.includes(name) && name.length < 30 && !/^\+?\d+$/.test(name)) {
       names.push(name);
     }
   }
@@ -294,6 +290,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
             headers: {
               'apikey': SUPABASE_ANON_KEY,
               'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
             }
           }
         );
@@ -337,132 +334,70 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🌐 [المستوى 3] جلب عبر Firecrawl 🔥
+    // 🌐 [المستوى 3] الجلب المباشر
     // ==========================================================
     let names = [];
     let success = false;
     let lastError = null;
     let source = '';
-    let rawData = null;
 
-    if (FIRECRAWL_API_KEY) {
-      console.log('🔥 استخدام Firecrawl...');
+    console.log('🔄 جاري الجلب المباشر...');
+    
+    try {
+      const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
       
-      try {
-        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
-        console.log(`📡 جلب البيانات من: ${targetUrl}`);
+      const response = await fetch(targetUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/html, application/xhtml+xml, application/xml;q=0.9, image/webp,*/*;q=0.8',
+          'Accept-Language': 'ar-YE,ar;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Referer': 'https://b.raw2fid.net/',
+          'Origin': 'https://b.raw2fid.net',
+          'Sec-Fetch-Dest': 'empty',
+          'Sec-Fetch-Mode': 'cors',
+          'Sec-Fetch-Site': 'same-origin'
+        }
+      });
+      
+      if (response.ok) {
+        const contentType = response.headers.get('content-type') || '';
         
-        const response = await fetch('https://api.firecrawl.dev/v2/scrape', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${FIRECRAWL_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            url: targetUrl,
-            formats: ['json', 'html'],
-            waitFor: 5000,
-            timeout: 30000
-          })
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          rawData = data;
-          console.log('✅ استجابة Firecrawl مستلمة');
-          
-          if (data.data && data.data.json) {
-            const extractedNames = extractNamesFromJSON(data.data.json);
-            if (extractedNames.length > 0) {
-              names = extractedNames;
-              success = true;
-              source = 'firecrawl_json';
-              console.log(`✅ استخراج ${names.length} اسم من JSON`);
-            }
-          }
-          
-          if (!success || names.length === 0) {
-            const htmlContent = data.data?.html || data.html || data.content || '';
-            if (htmlContent && htmlContent.length >= 50) {
-              const extractedNames = extractNamesFromResponse(htmlContent);
-              if (extractedNames.length > 0) {
-                names = extractedNames;
-                success = true;
-                source = 'firecrawl_html';
-                console.log(`✅ استخراج ${names.length} اسم من HTML`);
-              } else {
-                const alternativeNames = extractNamesAlternative(htmlContent);
-                if (alternativeNames.length > 0) {
-                  names = alternativeNames;
-                  success = true;
-                  source = 'firecrawl_alternative';
-                  console.log(`✅ استخراج ${names.length} اسم (طريقة بديلة)`);
-                }
-              }
-            }
+        if (contentType.includes('application/json')) {
+          const jsonData = await response.json();
+          const extractedNames = extractNamesFromJSON(jsonData);
+          if (extractedNames.length > 0) {
+            names = extractedNames;
+            success = true;
+            source = 'direct_json';
+            console.log(`✅ استخراج ${names.length} اسم من JSON مباشر`);
           }
         } else {
-          const errorText = await response.text();
-          console.log(`⚠️ فشل Firecrawl: ${response.status} - ${errorText}`);
-          lastError = `Firecrawl error: ${response.status}`;
-        }
-      } catch (e) {
-        console.error('❌ خطأ في Firecrawl:', e);
-        lastError = `Firecrawl exception: ${e.message}`;
-      }
-    } else {
-      console.log('⚠️ مفتاح Firecrawl غير موجود');
-      lastError = 'مفتاح Firecrawl غير موجود';
-    }
-
-    // ==========================================================
-    // 🔄 المحاولة البديلة: جلب مباشر
-    // ==========================================================
-    if (!success || names.length === 0) {
-      console.log('🔄 محاولة الجلب المباشر...');
-      
-      try {
-        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
-        
-        const response = await fetch(targetUrl, {
-          method: 'GET',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json, text/html, */*',
-            'Accept-Language': 'ar,en;q=0.9',
-            'Referer': 'https://b.raw2fid.net/'
-          }
-        });
-        
-        if (response.ok) {
-          const contentType = response.headers.get('content-type') || '';
-          
-          if (contentType.includes('application/json')) {
-            const jsonData = await response.json();
-            rawData = jsonData;
-            const extractedNames = extractNamesFromJSON(jsonData);
+          const htmlContent = await response.text();
+          if (htmlContent && htmlContent.length >= 50) {
+            const extractedNames = extractNamesFromResponse(htmlContent);
             if (extractedNames.length > 0) {
               names = extractedNames;
               success = true;
-              source = 'direct_json';
-              console.log(`✅ استخراج ${names.length} اسم من JSON مباشر`);
-            }
-          } else {
-            const htmlContent = await response.text();
-            if (htmlContent && htmlContent.length >= 50) {
-              const extractedNames = extractNamesFromResponse(htmlContent);
-              if (extractedNames.length > 0) {
-                names = extractedNames;
+              source = 'direct_scrape';
+              console.log(`✅ استخراج ${names.length} اسم من HTML مباشر`);
+            } else {
+              const alternativeNames = extractNamesAlternative(htmlContent);
+              if (alternativeNames.length > 0) {
+                names = alternativeNames;
                 success = true;
-                source = 'direct_scrape';
-                console.log(`✅ استخراج ${names.length} اسم من HTML مباشر`);
+                source = 'direct_alternative';
+                console.log(`✅ استخراج ${names.length} اسم (طريقة بديلة)`);
               }
             }
           }
         }
-      } catch (e) {
-        console.log(`⚠️ فشل الجلب المباشر: ${e.message}`);
+      } else {
+        lastError = `Direct request failed with status ${response.status}`;
       }
+    } catch (e) {
+      console.log(`⚠️ فشل الجلب المباشر: ${e.message}`);
+      lastError = e.message;
     }
 
     // ==========================================================
@@ -477,17 +412,16 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         debug: {
           phone: scrapePhone,
           provider: provider,
-          has_firecrawl_key: !!FIRECRAWL_API_KEY,
           source: source
         }
       });
     }
 
-    // --- 4. تجهيز النتيجة ---
+    // --- تجهيز النتيجة ---
     const results = names.map(name => ({
       name: name,
       phone: databasePhone,
-      source: source.includes('firecrawl') ? 'Firecrawl' : 'مباشر',
+      source: 'مباشر',
       provider: provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
@@ -520,6 +454,4 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 // ==========================================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 تشغيل خادم Node.js على المنفذ ${PORT}`);
-  console.log(`🔥 Firecrawl API Key: ${FIRECRAWL_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
-  console.log(`🔑 المفتاح: ${FIRECRAWL_API_KEY ? FIRECRAWL_API_KEY.substring(0, 15) + '...' : 'غير موجود'}`);
 });
