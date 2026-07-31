@@ -15,7 +15,6 @@ app.set('trust proxy', 1);
 // ==========================================================
 // 📊 نظام الكاش (Memory Cache)
 // ==========================================================
-
 class MemoryCache {
   constructor() {
     this.cache = new NodeCache({ stdTTL: 2592000, checkperiod: 86400 });
@@ -31,17 +30,15 @@ class MemoryCache {
     this.cache.set(requestKey, responseData);
   }
 
-  cleanup() {
-    // NodeCache يقوم بالتنظيف تلقائياً
-  }
+  cleanup() {}
 }
 
 // ==========================================================
 // 📊 نظام تحديد المعدل (Rate Limiting)
 // ==========================================================
 const rateLimiter = rateLimit({
-  windowMs: 3 * 1000, // 3 ثواني
-  max: 1, // طلب واحد لكل IP
+  windowMs: 3 * 1000,
+  max: 1,
   message: JSON.stringify({
     success: false,
     results: [],
@@ -82,18 +79,15 @@ app.use(express.json());
 // ==========================================================
 // 📝 دوال استخراج الأسماء
 // ==========================================================
-
 function extractNamesFromJSON(jsonData) {
   const names = [];
-  
   try {
     if (jsonData.result) {
       const text = jsonData.result;
       
       const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
       if (fameMatch) {
-        let name = fameMatch[1].trim();
-        name = cleanExtractedName(name);
+        let name = cleanExtractedName(fameMatch[1].trim());
         if (name && name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
           names.push(name);
         }
@@ -104,8 +98,7 @@ function extractNamesFromJSON(jsonData) {
         numberedMatches.forEach(m => {
           const nameMatch = m.match(/\d+\s*[-–—]\s*([^\d\n]+)/);
           if (nameMatch) {
-            let name = nameMatch[1].trim();
-            name = cleanExtractedName(name);
+            let name = cleanExtractedName(nameMatch[1].trim());
             if (name && name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
               names.push(name);
             }
@@ -116,8 +109,7 @@ function extractNamesFromJSON(jsonData) {
       const arabicPattern = /[\u0600-\u06FF]{3,}(?:\s+[\u0600-\u06FF]{3,}){0,3}/g;
       let arabicMatch;
       while ((arabicMatch = arabicPattern.exec(text)) !== null) {
-        let name = arabicMatch[0];
-        name = cleanExtractedName(name);
+        let name = cleanExtractedName(arabicMatch[0]);
         if (name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
           names.push(name);
         }
@@ -138,8 +130,7 @@ function extractNamesFromResponse(html) {
   const numberedPattern = /(\d+)\s*[-–—]\s*([^\d\n<]+)/g;
   let match;
   while ((match = numberedPattern.exec(html)) !== null) {
-    let name = match[2];
-    name = cleanExtractedName(name);
+    let name = cleanExtractedName(match[2]);
     if (name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
       names.push(name);
     }
@@ -148,8 +139,7 @@ function extractNamesFromResponse(html) {
   const arabicNamePattern = /[\u0600-\u06FF]{3,}(?:\s+[\u0600-\u06FF]{3,}){0,3}/g;
   let arabicMatch;
   while ((arabicMatch = arabicNamePattern.exec(html)) !== null) {
-    let name = arabicMatch[0];
-    name = cleanExtractedName(name);
+    let name = cleanExtractedName(arabicMatch[0]);
     if (name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
       names.push(name);
     }
@@ -158,8 +148,7 @@ function extractNamesFromResponse(html) {
   const nameTags = /<[^>]*name[^>]*>([^<]+)<\/[^>]*>/gi;
   let tagMatch;
   while ((tagMatch = nameTags.exec(html)) !== null) {
-    let name = tagMatch[1];
-    name = cleanExtractedName(name);
+    let name = cleanExtractedName(tagMatch[1]);
     if (name.length > 2 && !names.includes(name) && /[\u0600-\u06FF]/.test(name) && !/^\+?\d+$/.test(name)) {
       names.push(name);
     }
@@ -170,14 +159,12 @@ function extractNamesFromResponse(html) {
 
 function extractNamesAlternative(html) {
   const names = [];
-  
   const textContent = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
   
   const arabicPattern = /[\u0600-\u06FF]{3,}(?:\s+[\u0600-\u06FF]{3,}){0,2}/g;
   let match;
   while ((match = arabicPattern.exec(textContent)) !== null) {
-    let name = match[0];
-    name = cleanExtractedName(name);
+    let name = cleanExtractedName(match[0]);
     if (name.length > 2 && !names.includes(name) && name.length < 30 && !/^\+?\d+$/.test(name)) {
       names.push(name);
     }
@@ -188,8 +175,7 @@ function extractNamesAlternative(html) {
     const regex = new RegExp(`${keyword}[\\s:]*([^\\n<,]+)`, 'gi');
     let match;
     while ((match = regex.exec(textContent)) !== null) {
-      let name = match[1];
-      name = cleanExtractedName(name);
+      let name = cleanExtractedName(match[1]);
       if (name.length > 2 && !names.includes(name) && /[\u0600-\u06FF]/.test(name) && !/^\+?\d+$/.test(name)) {
         names.push(name);
       }
@@ -199,8 +185,7 @@ function extractNamesAlternative(html) {
   const pattern = /\d+[\s-]+([\u0600-\u06FF\s]+)/g;
   let patternMatch;
   while ((patternMatch = pattern.exec(textContent)) !== null) {
-    let name = patternMatch[1];
-    name = cleanExtractedName(name);
+    let name = cleanExtractedName(patternMatch[1]);
     if (name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
       names.push(name);
     }
@@ -290,7 +275,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
             headers: {
               'apikey': SUPABASE_ANON_KEY,
               'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             }
           }
         );
@@ -334,55 +319,63 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🌐 [المستوى 3] الجلب المباشر
+    // 🌐 [المستوى 3] الجلب عبر البروكسي المجاني (بدون مكتبات)
     // ==========================================================
     let names = [];
     let success = false;
     let lastError = null;
     let source = '';
 
-    console.log('🔄 جاري الجلب المباشر...');
+    console.log('🔄 جاري الجلب المباشر عبر البوابة...');
     
     try {
       const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
       
-      const response = await fetch(targetUrl, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Accept': 'application/json, text/html, application/xhtml+xml, application/xml;q=0.9, image/webp,*/*;q=0.8',
-          'Accept-Language': 'ar-YE,ar;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Referer': 'https://b.raw2fid.net/',
-          'Origin': 'https://b.raw2fid.net',
-          'Sec-Fetch-Dest': 'empty',
-          'Sec-Fetch-Mode': 'cors',
-          'Sec-Fetch-Site': 'same-origin'
+      // التخفي والتمرير لتخطي حظر Cloudflare و Render IP
+      const proxyGateways = [
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+        `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`
+      ];
+
+      let response = null;
+      for (const proxyUrl of proxyGateways) {
+        try {
+          response = await fetch(proxyUrl, {
+            method: 'GET',
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+            }
+          });
+          if (response.ok) break;
+        } catch (err) {
+          console.log(`⚠️ البروكسي يفشل، التجربة على المنفذ التالي...`);
         }
-      });
-      
-      if (response.ok) {
-        const contentType = response.headers.get('content-type') || '';
+      }
+
+      if (response && response.ok) {
+        const textData = await response.text();
         
-        if (contentType.includes('application/json')) {
-          const jsonData = await response.json();
+        // محاولة التحليل كـ JSON أولاً
+        try {
+          const jsonData = JSON.parse(textData);
           const extractedNames = extractNamesFromJSON(jsonData);
           if (extractedNames.length > 0) {
             names = extractedNames;
             success = true;
             source = 'direct_json';
-            console.log(`✅ استخراج ${names.length} اسم من JSON مباشر`);
+            console.log(`✅ استخراج ${names.length} اسم من JSON بنجاح`);
           }
-        } else {
-          const htmlContent = await response.text();
-          if (htmlContent && htmlContent.length >= 50) {
-            const extractedNames = extractNamesFromResponse(htmlContent);
+        } catch (e) {
+          // التحليل كـ HTML إذا لم يكن JSON
+          if (textData && textData.length >= 50) {
+            const extractedNames = extractNamesFromResponse(textData);
             if (extractedNames.length > 0) {
               names = extractedNames;
               success = true;
               source = 'direct_scrape';
-              console.log(`✅ استخراج ${names.length} اسم من HTML مباشر`);
+              console.log(`✅ استخراج ${names.length} اسم من HTML بنجاح`);
             } else {
-              const alternativeNames = extractNamesAlternative(htmlContent);
+              const alternativeNames = extractNamesAlternative(textData);
               if (alternativeNames.length > 0) {
                 names = alternativeNames;
                 success = true;
@@ -393,10 +386,10 @@ app.all('/api/search', rateLimiter, async (req, res) => {
           }
         }
       } else {
-        lastError = `Direct request failed with status ${response.status}`;
+        lastError = `Proxy failed with status: ${response ? response.status : 'No response'}`;
       }
     } catch (e) {
-      console.log(`⚠️ فشل الجلب المباشر: ${e.message}`);
+      console.log(`⚠️ فشل الجلب: ${e.message}`);
       lastError = e.message;
     }
 
