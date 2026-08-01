@@ -63,7 +63,7 @@ const rateLimiter = rateLimit({
 // ==========================================================
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://qfcsaiyuyxhibidrrmha.supabase.co";
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
-const SCRAPFLY_API_KEY = process.env.SCRAPFLY_API_KEY || "scp-live-1c35731ed0cd48728da4ea99aad57abd";
+const SCRAPFLY_API_KEY = process.env.SCRAPFLY_API_KEY || "scp-live-63ffd3e3d8fe419abe7b44b8f33b11ff";
 
 // إنشاء مثيلات
 const cache = new MemoryCache();
