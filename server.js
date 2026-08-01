@@ -33,7 +33,6 @@ class MemoryCache {
   }
 }
 
-
 // ==========================================================
 // 📊 نظام تحديد المعدل (Rate Limiting)
 // ==========================================================
@@ -60,17 +59,17 @@ const rateLimiter = rateLimit({
 });
 
 // ==========================================================
-// 🌐 متغيرات البيئة ومفتاح Firecrawl الثابت في الكود
+// 🌐 متغيرات البيئة ومفتاح Scrapfly
 // ==========================================================
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://qfcsaiyuyxhibidrrmha.supabase.co";
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
-const FIRECRAWL_API_KEY = "fc-1508e50352d446ea893ec93e752a6c6c";
+const SCRAPFLY_API_KEY = process.env.SCRAPFLY_API_KEY || "scp-live-1c35731ed0cd48728da4ea99aad57abd";
 
 // إنشاء مثيلات
 const cache = new MemoryCache();
 
 console.log('🚀 جاري تشغيل الخادم...');
-console.log(`🔥 Firecrawl API Key: ${FIRECRAWL_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
+console.log(`🪰 Scrapfly API Key: ${SCRAPFLY_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
 
 // ==========================================================
 // 🚀 Middleware
@@ -91,9 +90,9 @@ function extractNamesFromJSON(jsonData) {
   const names = [];
   
   try {
-    if (jsonData.result) {
-      const text = jsonData.result;
-      
+    const text = typeof jsonData === 'string' ? jsonData : (jsonData.result || JSON.stringify(jsonData));
+    
+    if (text) {
       const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
       if (fameMatch) {
         let name = fameMatch[1].trim();
@@ -133,7 +132,7 @@ function extractNamesFromJSON(jsonData) {
   
   return [...new Set(names)]
     .filter(name => !/^[\d+\s]+$/.test(name))
-    .slice(0, 20);
+    .slice(0, 200);
 }
 
 function extractNamesFromResponse(html) {
@@ -154,7 +153,7 @@ function extractNamesFromResponse(html) {
   while ((arabicMatch = arabicNamePattern.exec(html)) !== null) {
     let name = arabicMatch[0];
     name = cleanExtractedName(name);
-    if (name.length > 2 && !names.includes(name) && !name.includes('ل') && !/^\+?\d+$/.test(name)) {
+    if (name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
       names.push(name);
     }
   }
@@ -337,7 +336,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🌐 [المستوى 3] جلب عبر Firecrawl 🔥
+    // 🌐 [المستوى 3] جلب عبر Scrapfly 🪰
     // ==========================================================
     let names = [];
     let success = false;
@@ -345,57 +344,62 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     let source = '';
     let rawData = null;
 
-    if (FIRECRAWL_API_KEY) {
-      console.log('🔥 استخدام Firecrawl...');
+    if (SCRAPFLY_API_KEY) {
+      console.log('🪰 استخدام Scrapfly...');
       
       try {
         const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
         console.log(`📡 جلب البيانات من: ${targetUrl}`);
         
-        const response = await fetch('https://api.firecrawl.dev/v2/scrape', {
-          method: 'POST',
+        const scrapflyUrl = new URL('https://api.scrapfly.io/scrape');
+        scrapflyUrl.searchParams.append('key', SCRAPFLY_API_KEY);
+        scrapflyUrl.searchParams.append('url', targetUrl);
+        scrapflyUrl.searchParams.append('render_js', 'false');
+        scrapflyUrl.searchParams.append('asp', 'true'); // ميزة تجاوز الحماية
+
+        const response = await fetch(scrapflyUrl.toString(), {
+          method: 'GET',
           headers: {
-            'Authorization': `Bearer ${FIRECRAWL_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            url: targetUrl,
-            formats: ['json', 'html'],
-            waitFor: 5000,
-            timeout: 30000
-          })
+            'Accept': 'application/json'
+          }
         });
         
         if (response.ok) {
           const data = await response.json();
           rawData = data;
-          console.log('✅ استجابة Firecrawl مستلمة');
+          console.log('✅ استجابة Scrapfly مستلمة');
           
-          if (data.data && data.data.json) {
-            const extractedNames = extractNamesFromJSON(data.data.json);
+          const responseContent = data.result?.content || '';
+
+          // 1. محاولة معالجة النتيجة كـ JSON
+          try {
+            const parsedJson = typeof responseContent === 'string' ? JSON.parse(responseContent) : responseContent;
+            const extractedNames = extractNamesFromJSON(parsedJson);
             if (extractedNames.length > 0) {
               names = extractedNames;
               success = true;
-              source = 'firecrawl_json';
-              console.log(`✅ استخراج ${names.length} اسم من JSON`);
+              source = 'scrapfly_json';
+              console.log(`✅ استخراج ${names.length} اسم من Scrapfly (JSON)`);
             }
+          } catch (e) {
+            // المحتوى ليس JSON، قراءته كـ HTML
           }
-          
+
+          // 2. محاولة معالجة النتيجة كـ HTML
           if (!success || names.length === 0) {
-            const htmlContent = data.data?.html || data.html || data.content || '';
-            if (htmlContent && htmlContent.length >= 50) {
-              const extractedNames = extractNamesFromResponse(htmlContent);
+            if (responseContent && responseContent.length >= 50) {
+              const extractedNames = extractNamesFromResponse(responseContent);
               if (extractedNames.length > 0) {
                 names = extractedNames;
                 success = true;
-                source = 'firecrawl_html';
-                console.log(`✅ استخراج ${names.length} اسم من HTML`);
+                source = 'scrapfly_html';
+                console.log(`✅ استخراج ${names.length} اسم من Scrapfly (HTML)`);
               } else {
-                const alternativeNames = extractNamesAlternative(htmlContent);
+                const alternativeNames = extractNamesAlternative(responseContent);
                 if (alternativeNames.length > 0) {
                   names = alternativeNames;
                   success = true;
-                  source = 'firecrawl_alternative';
+                  source = 'scrapfly_alternative';
                   console.log(`✅ استخراج ${names.length} اسم (طريقة بديلة)`);
                 }
               }
@@ -403,16 +407,16 @@ app.all('/api/search', rateLimiter, async (req, res) => {
           }
         } else {
           const errorText = await response.text();
-          console.log(`⚠️ فشل Firecrawl: ${response.status} - ${errorText}`);
-          lastError = `Firecrawl error: ${response.status}`;
+          console.log(`⚠️ فشل Scrapfly: ${response.status} - ${errorText}`);
+          lastError = `Scrapfly error: ${response.status}`;
         }
       } catch (e) {
-        console.error('❌ خطأ في Firecrawl:', e);
-        lastError = `Firecrawl exception: ${e.message}`;
+        console.error('❌ خطأ في Scrapfly:', e);
+        lastError = `Scrapfly exception: ${e.message}`;
       }
     } else {
-      console.log('⚠️ مفتاح Firecrawl غير موجود');
-      lastError = 'مفتاح Firecrawl غير موجود';
+      console.log('⚠️ مفتاح Scrapfly غير موجود');
+      lastError = 'مفتاح Scrapfly غير موجود';
     }
 
     // ==========================================================
@@ -477,17 +481,17 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         debug: {
           phone: scrapePhone,
           provider: provider,
-          has_firecrawl_key: !!FIRECRAWL_API_KEY,
+          has_scrapfly_key: !!SCRAPFLY_API_KEY,
           source: source
         }
       });
     }
 
-    // --- 4. تجهيز النتيجة ---
+    // --- تجهيز النتيجة ---
     const results = names.map(name => ({
       name: name,
       phone: databasePhone,
-      source: source.includes('firecrawl') ? 'Firecrawl' : 'مباشر',
+      source: source.includes('scrapfly') ? 'Scrapfly' : 'مباشر',
       provider: provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
@@ -520,6 +524,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 // ==========================================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 تشغيل خادم Node.js على المنفذ ${PORT}`);
-  console.log(`🔥 Firecrawl API Key: ${FIRECRAWL_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
-  console.log(`🔑 المفتاح: ${FIRECRAWL_API_KEY ? FIRECRAWL_API_KEY.substring(0, 15) + '...' : 'غير موجود'}`);
+  console.log(`🪰 Scrapfly API Key: ${SCRAPFLY_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
+  console.log(`🔑 المفتاح: ${SCRAPFLY_API_KEY ? SCRAPFLY_API_KEY.substring(0, 15) + '...' : 'غير موجود'}`);
 });
