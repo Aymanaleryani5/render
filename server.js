@@ -132,7 +132,7 @@ function extractNamesFromJSON(jsonData) {
   
   return [...new Set(names)]
     .filter(name => !/^[\d+\s]+$/.test(name))
-    .slice(0, 200);
+    .slice(0, 20);
 }
 
 function extractNamesFromResponse(html) {
@@ -153,7 +153,7 @@ function extractNamesFromResponse(html) {
   while ((arabicMatch = arabicNamePattern.exec(html)) !== null) {
     let name = arabicMatch[0];
     name = cleanExtractedName(name);
-    if (name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
+    if (name.length > 2 && !names.includes(name) && !name.includes('ل') && !/^\+?\d+$/.test(name)) {
       names.push(name);
     }
   }
@@ -168,7 +168,7 @@ function extractNamesFromResponse(html) {
     }
   }
   
-  return [...new Set(names)].slice(0, 100);
+  return [...new Set(names)].slice(0, 200);
 }
 
 function extractNamesAlternative(html) {
