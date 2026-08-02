@@ -132,7 +132,7 @@ function extractNamesFromJSON(jsonData) {
   
   return [...new Set(names)]
     .filter(name => !/^[\d+\s]+$/.test(name))
-    .slice(0, 20);
+    .slice(0, 200);
 }
 
 function extractNamesFromResponse(html) {
