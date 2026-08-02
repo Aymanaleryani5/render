@@ -209,7 +209,7 @@ function extractNamesAlternative(html) {
     }
   }
   
-  return [...new Set(names)].slice(0, 50);
+  return [...new Set(names)].slice(0, 200);
 }
 
 function cleanExtractedName(name) {
