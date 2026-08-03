@@ -13,8 +13,6 @@ const PORT = process.env.PORT || 3000;
 
 class MemoryCache {
   constructor() {
-    // stdTTL: 2592000 (30 يومًا بالثواني)
-    // checkperiod: 86400 (فحص وتنظيف الكاش المنتهي يومياً)
     this.cache = new NodeCache({ stdTTL: 2592000, checkperiod: 86400 });
   }
 
@@ -59,17 +57,17 @@ const rateLimiter = rateLimit({
 });
 
 // ==========================================================
-// 🌐 متغيرات البيئة ومفتاح Scrapfly
+// 🌐 متغيرات البيئة ومفتاح ScrapingBee
 // ==========================================================
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://qfcsaiyuyxhibidrrmha.supabase.co";
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
-const SCRAPFLY_API_KEY = process.env.SCRAPFLY_API_KEY || "scp-live-584cc5e0cd83477d944d7bd1d961c501";
+const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY || "5BWZ9YMH5N4LWUYDVYI0RPE0TCD8O9KYP9MYLGP5NK8ZNVVOVGWGMQMF3QLT308LB281RPPQTIS38GNH";
 
 // إنشاء مثيلات
 const cache = new MemoryCache();
 
 console.log('🚀 جاري تشغيل الخادم...');
-console.log(`🪰 Scrapfly API Key: ${SCRAPFLY_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
+console.log(`🐝 ScrapingBee API Key: ${SCRAPINGBEE_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
 
 // ==========================================================
 // 🚀 Middleware
@@ -336,7 +334,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🌐 [المستوى 3] جلب عبر Scrapfly 🪰
+    // 🌐 [المستوى 3] جلب عبر ScrapingBee 🐝 (نموذج 1 Credit)
     // ==========================================================
     let names = [];
     let success = false;
@@ -344,42 +342,40 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     let source = '';
     let rawData = null;
 
-    if (SCRAPFLY_API_KEY) {
-      console.log('🪰 استخدام Scrapfly...');
+    if (SCRAPINGBEE_API_KEY) {
+      console.log('🐝 استخدام ScrapingBee (وضع 1 Credit)...');
       
       try {
         const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
         console.log(`📡 جلب البيانات من: ${targetUrl}`);
         
-        const scrapflyUrl = new URL('https://api.scrapfly.io/scrape');
-        scrapflyUrl.searchParams.append('key', SCRAPFLY_API_KEY);
-        scrapflyUrl.searchParams.append('url', targetUrl);
-        scrapflyUrl.searchParams.append('render_js', 'false');
-        scrapflyUrl.searchParams.append('asp', 'true'); // ميزة تجاوز الحماية
+        const scrapingBeeUrl = new URL('https://app.scrapingbee.com/api/v1/');
+        scrapingBeeUrl.searchParams.append('api_key', SCRAPINGBEE_API_KEY);
+        scrapingBeeUrl.searchParams.append('url', targetUrl);
+        scrapingBeeUrl.searchParams.append('render_js', 'false');       // 1 Credit
+        scrapingBeeUrl.searchParams.append('premium_proxy', 'false');   // ضمان عدم استهلاك 10 Credits
 
-        const response = await fetch(scrapflyUrl.toString(), {
+        const response = await fetch(scrapingBeeUrl.toString(), {
           method: 'GET',
           headers: {
-            'Accept': 'application/json'
+            'Accept': 'application/json, text/html, */*'
           }
         });
         
         if (response.ok) {
-          const data = await response.json();
-          rawData = data;
-          console.log('✅ استجابة Scrapfly مستلمة');
-          
-          const responseContent = data.result?.content || '';
+          const responseContent = await response.text();
+          rawData = responseContent;
+          console.log('✅ استجابة ScrapingBee مستلمة');
 
           // 1. محاولة معالجة النتيجة كـ JSON
           try {
-            const parsedJson = typeof responseContent === 'string' ? JSON.parse(responseContent) : responseContent;
+            const parsedJson = JSON.parse(responseContent);
             const extractedNames = extractNamesFromJSON(parsedJson);
             if (extractedNames.length > 0) {
               names = extractedNames;
               success = true;
-              source = 'scrapfly_json';
-              console.log(`✅ استخراج ${names.length} اسم من Scrapfly (JSON)`);
+              source = 'scrapingbee_json';
+              console.log(`✅ استخراج ${names.length} اسم من ScrapingBee (JSON)`);
             }
           } catch (e) {
             // المحتوى ليس JSON، قراءته كـ HTML
@@ -392,14 +388,14 @@ app.all('/api/search', rateLimiter, async (req, res) => {
               if (extractedNames.length > 0) {
                 names = extractedNames;
                 success = true;
-                source = 'scrapfly_html';
-                console.log(`✅ استخراج ${names.length} اسم من Scrapfly (HTML)`);
+                source = 'scrapingbee_html';
+                console.log(`✅ استخراج ${names.length} اسم من ScrapingBee (HTML)`);
               } else {
                 const alternativeNames = extractNamesAlternative(responseContent);
                 if (alternativeNames.length > 0) {
                   names = alternativeNames;
                   success = true;
-                  source = 'scrapfly_alternative';
+                  source = 'scrapingbee_alternative';
                   console.log(`✅ استخراج ${names.length} اسم (طريقة بديلة)`);
                 }
               }
@@ -407,16 +403,16 @@ app.all('/api/search', rateLimiter, async (req, res) => {
           }
         } else {
           const errorText = await response.text();
-          console.log(`⚠️ فشل Scrapfly: ${response.status} - ${errorText}`);
-          lastError = `Scrapfly error: ${response.status}`;
+          console.log(`⚠️ فشل ScrapingBee: ${response.status} - ${errorText}`);
+          lastError = `ScrapingBee error: ${response.status}`;
         }
       } catch (e) {
-        console.error('❌ خطأ في Scrapfly:', e);
-        lastError = `Scrapfly exception: ${e.message}`;
+        console.error('❌ خطأ في ScrapingBee:', e);
+        lastError = `ScrapingBee exception: ${e.message}`;
       }
     } else {
-      console.log('⚠️ مفتاح Scrapfly غير موجود');
-      lastError = 'مفتاح Scrapfly غير موجود';
+      console.log('⚠️ مفتاح ScrapingBee غير موجود');
+      lastError = 'مفتاح ScrapingBee غير موجود';
     }
 
     // ==========================================================
@@ -481,7 +477,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         debug: {
           phone: scrapePhone,
           provider: provider,
-          has_scrapfly_key: !!SCRAPFLY_API_KEY,
+          has_scrapingbee_key: !!SCRAPINGBEE_API_KEY,
           source: source
         }
       });
@@ -491,7 +487,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const results = names.map(name => ({
       name: name,
       phone: databasePhone,
-      source: source.includes('scrapfly') ? 'Scrapfly' : 'مباشر',
+      source: source.includes('scrapingbee') ? 'ScrapingBee' : 'مباشر',
       provider: provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
@@ -524,6 +520,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 // ==========================================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 تشغيل خادم Node.js على المنفذ ${PORT}`);
-  console.log(`🪰 Scrapfly API Key: ${SCRAPFLY_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
-  console.log(`🔑 المفتاح: ${SCRAPFLY_API_KEY ? SCRAPFLY_API_KEY.substring(0, 15) + '...' : 'غير موجود'}`);
+  console.log(`🐝 ScrapingBee API Key: ${SCRAPINGBEE_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
+  console.log(`🔑 المفتاح: ${SCRAPINGBEE_API_KEY ? SCRAPINGBEE_API_KEY.substring(0, 15) + '...' : 'غير موجود'}`);
 });
