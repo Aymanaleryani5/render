@@ -57,17 +57,17 @@ const rateLimiter = rateLimit({
 });
 
 // ==========================================================
-// 🌐 متغيرات البيئة ومفتاح ScrapingBee
+// 🌐 متغيرات البيئة ومفتاح Firecrawl
 // ==========================================================
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://qfcsaiyuyxhibidrrmha.supabase.co";
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
-const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY || "5BWZ9YMH5N4LWUYDVYI0RPE0TCD8O9KYP9MYLGP5NK8ZNVVOVGWGMQMF3QLT308LB281RPPQTIS38GNH";
+const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY || "fc-166a315d365941a8b9552f2a40f09386";
 
 // إنشاء مثيلات
 const cache = new MemoryCache();
 
 console.log('🚀 جاري تشغيل الخادم...');
-console.log(`🐝 ScrapingBee API Key: ${SCRAPINGBEE_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
+console.log(`🔥 Firecrawl API Key: ${FIRECRAWL_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
 
 // ==========================================================
 // 🚀 Middleware
@@ -334,7 +334,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🌐 [المستوى 3] جلب عبر ScrapingBee 🐝 (نموذج 1 Credit)
+    // 🌐 [المستوى 3] جلب عبر Firecrawl 🔥
     // ==========================================================
     let names = [];
     let success = false;
@@ -342,30 +342,32 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     let source = '';
     let rawData = null;
 
-    if (SCRAPINGBEE_API_KEY) {
-      console.log('🐝 استخدام ScrapingBee (وضع 1 Credit)...');
+    if (FIRECRAWL_API_KEY) {
+      console.log('🔥 استخدام Firecrawl API...');
       
       try {
         const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
         console.log(`📡 جلب البيانات من: ${targetUrl}`);
         
-        const scrapingBeeUrl = new URL('https://app.scrapingbee.com/api/v1/');
-        scrapingBeeUrl.searchParams.append('api_key', SCRAPINGBEE_API_KEY);
-        scrapingBeeUrl.searchParams.append('url', targetUrl);
-        scrapingBeeUrl.searchParams.append('render_js', 'false');       // 1 Credit
-        scrapingBeeUrl.searchParams.append('premium_proxy', 'false');   // ضمان عدم استهلاك 10 Credits
+        const firecrawlUrl = 'https://api.firecrawl.dev/v1/scrape';
 
-        const response = await fetch(scrapingBeeUrl.toString(), {
-          method: 'GET',
+        const response = await fetch(firecrawlUrl, {
+          method: 'POST',
           headers: {
-            'Accept': 'application/json, text/html, */*'
-          }
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${FIRECRAWL_API_KEY}`
+          },
+          body: JSON.stringify({
+            url: targetUrl,
+            formats: ['markdown', 'rawHtml']
+          })
         });
         
         if (response.ok) {
-          const responseContent = await response.text();
+          const fcResult = await response.json();
+          const responseContent = fcResult.data?.rawHtml || fcResult.data?.markdown || '';
           rawData = responseContent;
-          console.log('✅ استجابة ScrapingBee مستلمة');
+          console.log('✅ استجابة Firecrawl مستلمة');
 
           // 1. محاولة معالجة النتيجة كـ JSON
           try {
@@ -374,28 +376,28 @@ app.all('/api/search', rateLimiter, async (req, res) => {
             if (extractedNames.length > 0) {
               names = extractedNames;
               success = true;
-              source = 'scrapingbee_json';
-              console.log(`✅ استخراج ${names.length} اسم من ScrapingBee (JSON)`);
+              source = 'firecrawl_json';
+              console.log(`✅ استخراج ${names.length} اسم من Firecrawl (JSON)`);
             }
           } catch (e) {
-            // المحتوى ليس JSON، قراءته كـ HTML
+            // المحتوى ليس JSON، قراءته كـ HTML/Markdown
           }
 
-          // 2. محاولة معالجة النتيجة كـ HTML
+          // 2. محاولة معالجة النتيجة كـ HTML / Text
           if (!success || names.length === 0) {
             if (responseContent && responseContent.length >= 50) {
               const extractedNames = extractNamesFromResponse(responseContent);
               if (extractedNames.length > 0) {
                 names = extractedNames;
                 success = true;
-                source = 'scrapingbee_html';
-                console.log(`✅ استخراج ${names.length} اسم من ScrapingBee (HTML)`);
+                source = 'firecrawl_html';
+                console.log(`✅ استخراج ${names.length} اسم من Firecrawl (HTML)`);
               } else {
                 const alternativeNames = extractNamesAlternative(responseContent);
                 if (alternativeNames.length > 0) {
                   names = alternativeNames;
                   success = true;
-                  source = 'scrapingbee_alternative';
+                  source = 'firecrawl_alternative';
                   console.log(`✅ استخراج ${names.length} اسم (طريقة بديلة)`);
                 }
               }
@@ -403,16 +405,16 @@ app.all('/api/search', rateLimiter, async (req, res) => {
           }
         } else {
           const errorText = await response.text();
-          console.log(`⚠️ فشل ScrapingBee: ${response.status} - ${errorText}`);
-          lastError = `ScrapingBee error: ${response.status}`;
+          console.log(`⚠️ فشل Firecrawl: ${response.status} - ${errorText}`);
+          lastError = `Firecrawl error: ${response.status}`;
         }
       } catch (e) {
-        console.error('❌ خطأ في ScrapingBee:', e);
-        lastError = `ScrapingBee exception: ${e.message}`;
+        console.error('❌ خطأ في Firecrawl:', e);
+        lastError = `Firecrawl exception: ${e.message}`;
       }
     } else {
-      console.log('⚠️ مفتاح ScrapingBee غير موجود');
-      lastError = 'مفتاح ScrapingBee غير موجود';
+      console.log('⚠️ مفتاح Firecrawl غير موجود');
+      lastError = 'مفتاح Firecrawl غير موجود';
     }
 
     // ==========================================================
@@ -477,7 +479,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         debug: {
           phone: scrapePhone,
           provider: provider,
-          has_scrapingbee_key: !!SCRAPINGBEE_API_KEY,
+          has_firecrawl_key: !!FIRECRAWL_API_KEY,
           source: source
         }
       });
@@ -487,7 +489,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const results = names.map(name => ({
       name: name,
       phone: databasePhone,
-      source: source.includes('scrapingbee') ? 'ScrapingBee' : 'مباشر',
+      source: source.includes('firecrawl') ? 'Firecrawl' : 'مباشر',
       provider: provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
@@ -520,6 +522,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 // ==========================================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 تشغيل خادم Node.js على المنفذ ${PORT}`);
-  console.log(`🐝 ScrapingBee API Key: ${SCRAPINGBEE_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
-  console.log(`🔑 المفتاح: ${SCRAPINGBEE_API_KEY ? SCRAPINGBEE_API_KEY.substring(0, 15) + '...' : 'غير موجود'}`);
+  console.log(`🔥 Firecrawl API Key: ${FIRECRAWL_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
+  console.log(`🔑 المفتاح: ${FIRECRAWL_API_KEY ? FIRECRAWL_API_KEY.substring(0, 15) + '...' : 'غير موجود'}`);
 });
