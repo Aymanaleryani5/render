@@ -334,7 +334,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🌐 [المستوى 3] جلب عبر Firecrawl 🔥
+    // 🌐 [المستوى 3] جلب عبر Firecrawl 🔥 (إصدار API v2)
     // ==========================================================
     let names = [];
     let success = false;
@@ -343,57 +343,54 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     let rawData = null;
 
     if (FIRECRAWL_API_KEY) {
-      console.log('🔥 استخدام Firecrawl API...');
+      console.log('🔥 استخدام Firecrawl API (v2)...');
       
       try {
         const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
         console.log(`📡 جلب البيانات من: ${targetUrl}`);
         
-        const firecrawlUrl = 'https://api.firecrawl.dev/v1/scrape';
-
-        const response = await fetch(firecrawlUrl, {
+        const response = await fetch('https://api.firecrawl.dev/v2/scrape', {
           method: 'POST',
           headers: {
+            'Authorization': `Bearer ${FIRECRAWL_API_KEY}`,
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${FIRECRAWL_API_KEY}`
           },
           body: JSON.stringify({
             url: targetUrl,
-            formats: ['markdown', 'rawHtml']
+            formats: ['json', 'html'],
+            waitFor: 5000,
+            timeout: 30000
           })
         });
         
         if (response.ok) {
-          const fcResult = await response.json();
-          const responseContent = fcResult.data?.rawHtml || fcResult.data?.markdown || '';
-          rawData = responseContent;
-          console.log('✅ استجابة Firecrawl مستلمة');
-
-          // 1. محاولة معالجة النتيجة كـ JSON
-          try {
-            const parsedJson = JSON.parse(responseContent);
-            const extractedNames = extractNamesFromJSON(parsedJson);
+          const data = await response.json();
+          rawData = data;
+          console.log('✅ استجابة Firecrawl مستلمة (v2)');
+          
+          // 1. معالجة إذا أرجعت الاستجابة كائن JSON
+          if (data.data && data.data.json) {
+            const extractedNames = extractNamesFromJSON(data.data.json);
             if (extractedNames.length > 0) {
               names = extractedNames;
               success = true;
               source = 'firecrawl_json';
-              console.log(`✅ استخراج ${names.length} اسم من Firecrawl (JSON)`);
+              console.log(`✅ استخراج ${names.length} اسم من JSON`);
             }
-          } catch (e) {
-            // المحتوى ليس JSON، قراءته كـ HTML/Markdown
           }
-
-          // 2. محاولة معالجة النتيجة كـ HTML / Text
+          
+          // 2. معالجة إذا كانت الاستجابة تحتوي على HTML / Text
           if (!success || names.length === 0) {
-            if (responseContent && responseContent.length >= 50) {
-              const extractedNames = extractNamesFromResponse(responseContent);
+            const htmlContent = data.data?.html || data.data?.rawHtml || data.html || data.content || '';
+            if (htmlContent && htmlContent.length >= 50) {
+              const extractedNames = extractNamesFromResponse(htmlContent);
               if (extractedNames.length > 0) {
                 names = extractedNames;
                 success = true;
                 source = 'firecrawl_html';
-                console.log(`✅ استخراج ${names.length} اسم من Firecrawl (HTML)`);
+                console.log(`✅ استخراج ${names.length} اسم من HTML`);
               } else {
-                const alternativeNames = extractNamesAlternative(responseContent);
+                const alternativeNames = extractNamesAlternative(htmlContent);
                 if (alternativeNames.length > 0) {
                   names = alternativeNames;
                   success = true;
