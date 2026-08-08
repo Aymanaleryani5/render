@@ -1,3 +1,5 @@
+
+
 const express = require('express');
 const cors = require('cors');
 const NodeCache = require('node-cache');
@@ -81,29 +83,8 @@ app.use(cors({
 app.use(express.json());
 
 // ==========================================================
-// 📝 دوال استخراج وتنظيف الأسماء
+// 📝 دوال استخراج الأسماء
 // ==========================================================
-
-function cleanExtractedName(name) {
-  if (!name) return '';
-  return name
-    // 1. إزالة عبارات الواجهة النصية (اسم الشهرة / الأكثر شيوعاً)
-    .replace(/اسم\s*الشهرة[\s:]*/gi, '')
-    .replace(/\.?\s*هذا\s*الاسم\s*هو\s*الأكثر\s*شيوعاً\s*لهذا\s*الرقم/gi, '')
-    
-    // 2. التنظيف البرمجي والنصوص الزائدة الأصلية
-    .replace(/نتائج\s*البحث\s*للرقم/gi, '')
-    .replace(/\|{2,}\s*split\s*\|{2,}/gi, '')
-    .replace(/\{.*?\}/g, '')
-    .replace(/[\\{}{}\[\]"':\-_,\/]/g, ' ')
-    
-    // 3. حذف الكلمات الدلالية والأدوات المستبعدة
-    .replace(/\b(info|country|n|null|undefined|الرقم|search|phone|نتائج|البحث|للرقم|السجلات|المكتشفة|الأكثر|شيوعاً|اليمن|من|هذا|هذه|كان|مع|عن|على|الى|حتى|بين|أو|و|ف|في|إلى|عند|ب|ك|ل|لل|ثم|لكن|ولا|حيث|عندما|ذلك|التي|الذي|الذين|اللاتي|اللواتي|منذ|خلال|بسبب|دون|بينما|حيثما|كلما|متى|أين|كيف|إذا|لن|لم|ما|لا|ليس|سوف|قد|ربما|لعل|ليت|لابد|لكي|كي)\b/gi, '')
-    
-    // 4. إزالة الفراغات الزائدة
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 function extractNamesFromJSON(jsonData) {
   const names = [];
@@ -140,7 +121,7 @@ function extractNamesFromJSON(jsonData) {
       while ((arabicMatch = arabicPattern.exec(text)) !== null) {
         let name = arabicMatch[0];
         name = cleanExtractedName(name);
-        if (name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
+        if (name.length > 2 && !names.includes(name) && !name.includes('ل') && !/^\+?\d+$/.test(name)) {
           names.push(name);
         }
       }
@@ -172,7 +153,7 @@ function extractNamesFromResponse(html) {
   while ((arabicMatch = arabicNamePattern.exec(html)) !== null) {
     let name = arabicMatch[0];
     name = cleanExtractedName(name);
-    if (name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
+    if (name.length > 2 && !names.includes(name) && !name.includes('ل') && !/^\+?\d+$/.test(name)) {
       names.push(name);
     }
   }
@@ -200,7 +181,7 @@ function extractNamesAlternative(html) {
   while ((match = arabicPattern.exec(textContent)) !== null) {
     let name = match[0];
     name = cleanExtractedName(name);
-    if (name.length > 2 && !names.includes(name) && name.length < 30 && !/^\+?\d+$/.test(name)) {
+    if (name.length > 2 && !names.includes(name) && !name.includes('ل') && name.length < 30 && !/^\+?\d+$/.test(name)) {
       names.push(name);
     }
   }
@@ -229,6 +210,18 @@ function extractNamesAlternative(html) {
   }
   
   return [...new Set(names)].slice(0, 200);
+}
+
+function cleanExtractedName(name) {
+  if (!name) return '';
+  return name
+    .replace(/نتائج\s*البحث\s*للرقم/gi, '')
+    .replace(/\|{2,}\s*split\s*\|{2,}/gi, '')
+    .replace(/\{.*?\}/g, '')
+    .replace(/[\\{}{}\[\]"':\-_,\/]/g, ' ')
+    .replace(/\b(info|country|n|null|undefined|الرقم|اسم|search|phone|نتائج|البحث|للرقم|الشهرة|السجلات|المكتشفة|الأكثر|شيوعاً|اليمن|من|هذا|هذه|كان|مع|عن|على|الى|حتى|بين|أو|و|ف|في|إلى|على|عن|من|إلى|عند|ب|ك|ل|لل|و|ثم|حتى|لكن|ولا|أو|ثم|حيث|بين|عندما|ذلك|هذه|هذا|التي|الذي|الذين|اللاتي|اللواتي|منذ|خلال|بسبب|دون|بينما|حيثما|كلما|متى|أين|كيف|إذا|لن|لم|ما|لا|ليس|سوف|قد|ربما|لعل|ليت|لابد|لعل|لكي|كي|حتّى|حتى)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function detectProvider(cleanPhone) {
@@ -310,8 +303,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
             console.log(`✅ تم العثور على الرقم في Supabase!`);
             
             const results = existingRecords.map((rec) => {
-              const rawName = rec.name || rec.contact_name || rec.full_name || rec.username || 'اسم غير معروف';
-              const name = cleanExtractedName(rawName) || rawName;
+              const name = rec.name || rec.contact_name || rec.full_name || rec.username || 'اسم غير معروف';
               const phone = rec.phone || rec.phone_number || databasePhone;
               const src = rec.source || rec.data_source || 'قاعدة البيانات';
               const prov = rec.provider || rec.telecom || provider;
