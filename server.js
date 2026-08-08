@@ -93,7 +93,7 @@ function extractNamesFromJSON(jsonData) {
     const text = typeof jsonData === 'string' ? jsonData : (jsonData.result || JSON.stringify(jsonData));
     
     if (text) {
-      const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
+      
       if (fameMatch) {
         let name = fameMatch[1].trim();
         name = cleanExtractedName(name);
@@ -186,7 +186,7 @@ function extractNamesAlternative(html) {
     }
   }
   
-  const keywords = ['اسم', 'الاسم', 'name', 'user', 'contact', 'صاحب', 'مالك', 'الشهرة', 'المستخدم', 'العميل'];
+  const keywords = [ 'الاسم', 'name', 'user', 'contact', 'صاحب', 'مالك', 'المستخدم', 'العميل'];
   for (const keyword of keywords) {
     const regex = new RegExp(`${keyword}[\\s:]*([^\\n<,]+)`, 'gi');
     let match;
