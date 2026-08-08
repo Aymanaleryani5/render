@@ -213,6 +213,10 @@ function extractNamesAlternative(html) {
 function cleanExtractedName(name) {
   if (!name) return '';
   return name
+    // تمت الإضافة: حذف العبارات المطلوب إزالتها
+    .replace(/اسم\s*الشهرة[\s:]*/gi, '')
+    .replace(/\.?\s*هذا\s*الاسم\s*هو\s*الأكثر\s*شيوعاً\s*لهذا\s*الرقم/gi, '')
+    
     .replace(/نتائج\s*البحث\s*للرقم/gi, '')
     .replace(/\|{2,}\s*split\s*\|{2,}/gi, '')
     .replace(/\{.*?\}/g, '')
