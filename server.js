@@ -84,20 +84,6 @@ app.use(express.json());
 // 📝 دوال استخراج الأسماء
 // ==========================================================
 
-function cleanExtractedName(name) {
-  if (!name) return '';
-  return name
-    // إزالة العبارات المحددة فقط بشكل دقيق
-    .replace(/اسم\s*الشهرة[\s:]*/gi, '')
-    .replace(/\.?\s*هذا\s*الاسم\s*هو\s*الأكثر\s*شيوعاً\s*لهذا\s*الرقم/gi, '')
-    .replace(/نتائج\s*البحث\s*للرقم/gi, '')
-    .replace(/\|{2,}\s*split\s*\|{2,}/gi, '')
-    .replace(/\{.*?\}/g, '')
-    .replace(/[\\{}{}\[\]"':\-_,\/]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 function extractNamesFromJSON(jsonData) {
   const names = [];
   
@@ -133,7 +119,7 @@ function extractNamesFromJSON(jsonData) {
       while ((arabicMatch = arabicPattern.exec(text)) !== null) {
         let name = arabicMatch[0];
         name = cleanExtractedName(name);
-        if (name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
+        if (name.length > 2 && !names.includes(name) && !name.includes('ل') && !/^\+?\d+$/.test(name)) {
           names.push(name);
         }
       }
@@ -165,7 +151,7 @@ function extractNamesFromResponse(html) {
   while ((arabicMatch = arabicNamePattern.exec(html)) !== null) {
     let name = arabicMatch[0];
     name = cleanExtractedName(name);
-    if (name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
+    if (name.length > 2 && !names.includes(name) && !name.includes('ل') && !/^\+?\d+$/.test(name)) {
       names.push(name);
     }
   }
@@ -193,7 +179,7 @@ function extractNamesAlternative(html) {
   while ((match = arabicPattern.exec(textContent)) !== null) {
     let name = match[0];
     name = cleanExtractedName(name);
-    if (name.length > 2 && !names.includes(name) && name.length < 30 && !/^\+?\d+$/.test(name)) {
+    if (name.length > 2 && !names.includes(name) && !name.includes('ل') && name.length < 30 && !/^\+?\d+$/.test(name)) {
       names.push(name);
     }
   }
@@ -222,6 +208,22 @@ function extractNamesAlternative(html) {
   }
   
   return [...new Set(names)].slice(0, 200);
+}
+
+function cleanExtractedName(name) {
+  if (!name) return '';
+  return name
+    // تمت الإضافة: حذف العبارات المطلوب إزالتها
+    .replace(/اسم\s*الشهرة[\s:]*/gi, '')
+    .replace(/\.?\s*هذا\s*الاسم\s*هو\s*الأكثر\s*شيوعاً\s*لهذا\s*الرقم/gi, '')
+    
+    .replace(/نتائج\s*البحث\s*للرقم/gi, '')
+    .replace(/\|{2,}\s*split\s*\|{2,}/gi, '')
+    .replace(/\{.*?\}/g, '')
+    .replace(/[\\{}{}\[\]"':\-_,\/]/g, ' ')
+    .replace(/\b(info|country|n|null|undefined|الرقم|اسم|search|phone|نتائج|البحث|للرقم|الشهرة|السجلات|المكتشفة|الأكثر|شيوعاً|اليمن|من|هذا|هذه|كان|مع|عن|على|الى|حتى|بين|أو|و|ف|في|إلى|على|عن|من|إلى|عند|ب|ك|ل|لل|و|ثم|حتى|لكن|ولا|أو|ثم|حيث|بين|عندما|ذلك|هذه|هذا|التي|الذي|الذين|اللاتي|اللواتي|منذ|خلال|بسبب|دون|بينما|حيثما|كلما|متى|أين|كيف|إذا|لن|لم|ما|لا|ليس|سوف|قد|ربما|لعل|ليت|لابد|لعل|لكي|كي|حتّى|حتى)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function detectProvider(cleanPhone) {
@@ -310,7 +312,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
               const date = rec.created_at || rec.added_at || new Date().toISOString();
 
               return {
-                name: cleanExtractedName(name) || name,
+                name: name,
                 phone: phone,
                 source: src,
                 provider: prov,
