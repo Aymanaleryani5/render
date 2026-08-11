@@ -422,7 +422,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       console.log('🔄 محاولة الجلب المباشر...');
       
       try {
-        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
+        const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
         
         const response = await fetch(targetUrl, {
           method: 'GET',
