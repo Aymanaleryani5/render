@@ -346,7 +346,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       console.log('🐝 استخدام ScrapingBee (وضع 1 Credit)...');
       
       try {
-        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
+        const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
         console.log(`📡 جلب البيانات من: ${targetUrl}`);
         
         const scrapingBeeUrl = new URL('https://app.scrapingbee.com/api/v1/');
