@@ -346,7 +346,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       console.log('🐝 استخدام ScrapingBee (وضع 1 Credit)...');
       
       try {
-        const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
+        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
         console.log(`📡 جلب البيانات من: ${targetUrl}`);
         
         const scrapingBeeUrl = new URL('https://app.scrapingbee.com/api/v1/');
@@ -422,7 +422,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       console.log('🔄 محاولة الجلب المباشر...');
       
       try {
-        const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
+        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
         
         const response = await fetch(targetUrl, {
           method: 'GET',
@@ -430,7 +430,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/json, text/html, */*',
             'Accept-Language': 'ar,en;q=0.9',
-            'Referer': 'https://3.raw2fid.net/'
+            'Referer': 'https://b.raw2fid.net/'
           }
         });
         
