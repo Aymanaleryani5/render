@@ -334,7 +334,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🌐 [المستوى 3] جلب عبر ScrapingBee 🐝 (نموذج 1 Credit)
+    // 🌐 [المستوى 3] جلب عبر ScrapingBee 🐝 (محاكاة الهيدرات الكاملة)
     // ==========================================================
     let names = [];
     let success = false;
@@ -342,24 +342,44 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     let source = '';
     let rawData = null;
 
+    // توليد Referer بنفس التشفير الذي يستخدمه الموقع (Base64 للرقم مع K)
+    const base64Phone = Buffer.from(scrapePhone).toString('base64');
+    const dynamicReferer = `https://b.raw2fid.net/calle/?res_id=K${base64Phone}%3D%3D`;
+    const timestamp = Date.now();
+
+    // الترويسات الرسمية المستخرجة من DevTools
+    const browserHeaders = {
+      'accept': '*/*',
+      'accept-language': 'en-US,en;q=0.9,ar;q=0.8',
+      'cache-control': 'no-cache',
+      'pragma': 'no-cache',
+      'referer': dynamicReferer,
+      'sec-ch-ua': '"Not=A?Brand";v="99", "Google Chrome";v="151", "Chromium";v="151"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'
+    };
+
     if (SCRAPINGBEE_API_KEY) {
-      console.log('🐝 استخدام ScrapingBee (وضع 1 Credit)...');
+      console.log('🐝 استخدام ScrapingBee مع ترويسات المتصفح الدقيقة...');
       
       try {
-        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
+        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
         console.log(`📡 جلب البيانات من: ${targetUrl}`);
         
         const scrapingBeeUrl = new URL('https://app.scrapingbee.com/api/v1/');
         scrapingBeeUrl.searchParams.append('api_key', SCRAPINGBEE_API_KEY);
         scrapingBeeUrl.searchParams.append('url', targetUrl);
-        scrapingBeeUrl.searchParams.append('render_js', 'false');       // 1 Credit
-        scrapingBeeUrl.searchParams.append('premium_proxy', 'false');   // ضمان عدم استهلاك 10 Credits
+        scrapingBeeUrl.searchParams.append('render_js', 'false');
+        scrapingBeeUrl.searchParams.append('forward_headers', 'true'); // تمرير الهيدرات المحاكية
+        scrapingBeeUrl.searchParams.append('premium_proxy', 'true');   // لتجاوز حظر الـ IPs
 
         const response = await fetch(scrapingBeeUrl.toString(), {
           method: 'GET',
-          headers: {
-            'Accept': 'application/json, text/html, */*'
-          }
+          headers: browserHeaders
         });
         
         if (response.ok) {
@@ -378,12 +398,12 @@ app.all('/api/search', rateLimiter, async (req, res) => {
               console.log(`✅ استخراج ${names.length} اسم من ScrapingBee (JSON)`);
             }
           } catch (e) {
-            // المحتوى ليس JSON، قراءته كـ HTML
+            // المحتوى ليس JSON
           }
 
           // 2. محاولة معالجة النتيجة كـ HTML
           if (!success || names.length === 0) {
-            if (responseContent && responseContent.length >= 50) {
+            if (responseContent && responseContent.length >= 20) {
               const extractedNames = extractNamesFromResponse(responseContent);
               if (extractedNames.length > 0) {
                 names = extractedNames;
@@ -416,29 +436,24 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🔄 المحاولة البديلة: جلب مباشر
+    // 🔄 المحاولة البديلة: جلب مباشر (GET محاكاة المتصفح الدقيقة)
     // ==========================================================
     if (!success || names.length === 0) {
-      console.log('🔄 محاولة الجلب المباشر...');
+      console.log('🔄 محاولة الجلب المباشر عبر المحاكاة...');
       
       try {
-        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
+        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
         
         const response = await fetch(targetUrl, {
           method: 'GET',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json, text/html, */*',
-            'Accept-Language': 'ar,en;q=0.9',
-            'Referer': 'https://b.raw2fid.net/'
-          }
+          headers: browserHeaders
         });
         
         if (response.ok) {
-          const contentType = response.headers.get('content-type') || '';
+          const responseText = await response.text();
           
-          if (contentType.includes('application/json')) {
-            const jsonData = await response.json();
+          try {
+            const jsonData = JSON.parse(responseText);
             rawData = jsonData;
             const extractedNames = extractNamesFromJSON(jsonData);
             if (extractedNames.length > 0) {
@@ -447,10 +462,9 @@ app.all('/api/search', rateLimiter, async (req, res) => {
               source = 'direct_json';
               console.log(`✅ استخراج ${names.length} اسم من JSON مباشر`);
             }
-          } else {
-            const htmlContent = await response.text();
-            if (htmlContent && htmlContent.length >= 50) {
-              const extractedNames = extractNamesFromResponse(htmlContent);
+          } catch (e) {
+            if (responseText && responseText.length >= 20) {
+              const extractedNames = extractNamesFromResponse(responseText);
               if (extractedNames.length > 0) {
                 names = extractedNames;
                 success = true;
