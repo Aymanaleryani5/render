@@ -1,8 +1,3 @@
-عندما ابحث هاطذا يظهر لي النتايج
-
-https://3.nabx.net/wp-admin/admin-ajax.php?action=alosh_search&phone=%2B967770506331
-ولكن بكودي لم يعد يظهر لي نفس قبل
-
 const express = require('express');
 const cors = require('cors');
 const NodeCache = require('node-cache');
