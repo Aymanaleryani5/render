@@ -1,3 +1,8 @@
+عندما ابحث هاطذا يظهر لي النتايج
+
+https://3.nabx.net/wp-admin/admin-ajax.php?action=alosh_search&phone=%2B967770506331
+ولكن بكودي لم يعد يظهر لي نفس قبل
+
 const express = require('express');
 const cors = require('cors');
 const NodeCache = require('node-cache');
@@ -81,7 +86,7 @@ app.use(cors({
 app.use(express.json());
 
 // ==========================================================
-// 📝 دوال استخراج الأسماء (الكود الأصلي بالكامل)
+// 📝 دوال استخراج الأسماء
 // ==========================================================
 
 function extractNamesFromJSON(jsonData) {
@@ -334,7 +339,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🌐 [المستوى 3] جلب عبر ScrapingBee 🐝
+    // 🌐 [المستوى 3] جلب عبر ScrapingBee 🐝 (نموذج 1 Credit)
     // ==========================================================
     let names = [];
     let success = false;
@@ -342,29 +347,23 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     let source = '';
     let rawData = null;
 
-    // الرابط المستهدف الصحيح الشغال لديك
-    const targetUrl = `https://3.nabx.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
-
     if (SCRAPINGBEE_API_KEY) {
-      console.log('🐝 استخدام ScrapingBee...');
+      console.log('🐝 استخدام ScrapingBee (وضع 1 Credit)...');
       
       try {
+        const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
         console.log(`📡 جلب البيانات من: ${targetUrl}`);
         
         const scrapingBeeUrl = new URL('https://app.scrapingbee.com/api/v1/');
         scrapingBeeUrl.searchParams.append('api_key', SCRAPINGBEE_API_KEY);
         scrapingBeeUrl.searchParams.append('url', targetUrl);
         scrapingBeeUrl.searchParams.append('render_js', 'false');       // 1 Credit
-        scrapingBeeUrl.searchParams.append('premium_proxy', 'false');
-        scrapingBeeUrl.searchParams.append('forward_headers', 'true');  // لتفادي خطأ 500
+        scrapingBeeUrl.searchParams.append('premium_proxy', 'false');   // ضمان عدم استهلاك 10 Credits
 
         const response = await fetch(scrapingBeeUrl.toString(), {
           method: 'GET',
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/html, */*',
-            'Accept-Language': 'ar,en;q=0.9',
-            'Referer': 'https://3.nabx.net/'
+            'Accept': 'application/json, text/html, */*'
           }
         });
         
@@ -422,19 +421,21 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🔄 المحاولة البديلة: جلب مباشر (في حال فشل ScrapingBee أو أرجع 500)
+    // 🔄 المحاولة البديلة: جلب مباشر
     // ==========================================================
     if (!success || names.length === 0) {
       console.log('🔄 محاولة الجلب المباشر...');
       
       try {
+        const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}`;
+        
         const response = await fetch(targetUrl, {
           method: 'GET',
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/json, text/html, */*',
             'Accept-Language': 'ar,en;q=0.9',
-            'Referer': 'https://3.nabx.net/'
+            'Referer': 'https://3.raw2fid.net/'
           }
         });
         
