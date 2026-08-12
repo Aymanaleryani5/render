@@ -81,133 +81,30 @@ app.use(cors({
 app.use(express.json());
 
 // ==========================================================
-// 📝 دوال استخراج الأسماء
+// 📝 دوال استخراج وتنظيف الأسماء
 // ==========================================================
 
-function extractNamesFromJSON(jsonData) {
-  const names = [];
-  
-  try {
-    const text = typeof jsonData === 'string' ? jsonData : (jsonData.result || JSON.stringify(jsonData));
-    
-    if (text) {
-      const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
-      if (fameMatch) {
-        let name = fameMatch[1].trim();
-        name = cleanExtractedName(name);
-        if (name && name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
-          names.push(name);
-        }
-      }
-      
-      const numberedMatches = text.match(/\d+\s*[-–—]\s*([^\d\n]+)/g);
-      if (numberedMatches) {
-        numberedMatches.forEach(m => {
-          const nameMatch = m.match(/\d+\s*[-–—]\s*([^\d\n]+)/);
-          if (nameMatch) {
-            let name = nameMatch[1].trim();
-            name = cleanExtractedName(name);
-            if (name && name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
-              names.push(name);
-            }
-          }
-        });
-      }
-      
-      const arabicPattern = /[\u0600-\u06FF]{3,}(?:\s+[\u0600-\u06FF]{3,}){0,3}/g;
-      let arabicMatch;
-      while ((arabicMatch = arabicPattern.exec(text)) !== null) {
-        let name = arabicMatch[0];
-        name = cleanExtractedName(name);
-        if (name.length > 2 && !names.includes(name) && !name.includes('ل') && !/^\+?\d+$/.test(name)) {
-          names.push(name);
-        }
-      }
-    }
-  } catch (e) {
-    console.error('خطأ في استخراج الأسماء من JSON:', e);
-  }
-  
-  return [...new Set(names)]
-    .filter(name => !/^[\d+\s]+$/.test(name))
-    .slice(0, 200);
-}
+// قائمة الكلمات المحظورة التي ليست أسماء أشخاص
+const STOP_WORDS = [
+  'صحيح', 'صحيحة', 'خطأ', 'نعم', 'لا', 'بحث', 'نتائج', 'البحث', 'للرقم', 
+  'اسم', 'الشهرة', 'السجلات', 'المكتشفة', 'الأكثر', 'شيوعاً', 'اليمن', 
+  'سجل', 'تفاصيل', 'بيانات', 'عفواً', 'تأكيد', 'الرقم', 'يرجى', 'الانتظار',
+  'null', 'undefined', 'info', 'country', 'search', 'phone', 'true', 'false'
+];
 
-function extractNamesFromResponse(html) {
-  const names = [];
+function isRealName(name) {
+  if (!name || name.length < 3) return false;
   
-  const numberedPattern = /(\d+)\s*[-–—]\s*([^\d\n<]+)/g;
-  let match;
-  while ((match = numberedPattern.exec(html)) !== null) {
-    let name = match[2];
-    name = cleanExtractedName(name);
-    if (name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
-      names.push(name);
-    }
-  }
-  
-  const arabicNamePattern = /[\u0600-\u06FF]{3,}(?:\s+[\u0600-\u06FF]{3,}){0,3}/g;
-  let arabicMatch;
-  while ((arabicMatch = arabicNamePattern.exec(html)) !== null) {
-    let name = arabicMatch[0];
-    name = cleanExtractedName(name);
-    if (name.length > 2 && !names.includes(name) && !name.includes('ل') && !/^\+?\d+$/.test(name)) {
-      names.push(name);
-    }
-  }
-  
-  const nameTags = /<[^>]*name[^>]*>([^<]+)<\/[^>]*>/gi;
-  let tagMatch;
-  while ((tagMatch = nameTags.exec(html)) !== null) {
-    let name = tagMatch[1];
-    name = cleanExtractedName(name);
-    if (name.length > 2 && !names.includes(name) && /[\u0600-\u06FF]/.test(name) && !/^\+?\d+$/.test(name)) {
-      names.push(name);
-    }
-  }
-  
-  return [...new Set(names)].slice(0, 200);
-}
+  // تجاهل أي اسم يتكون من الأرقام فقط
+  if (/^\+?\d+$/.test(name)) return false;
 
-function extractNamesAlternative(html) {
-  const names = [];
-  
-  const textContent = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
-  
-  const arabicPattern = /[\u0600-\u06FF]{3,}(?:\s+[\u0600-\u06FF]{3,}){0,2}/g;
-  let match;
-  while ((match = arabicPattern.exec(textContent)) !== null) {
-    let name = match[0];
-    name = cleanExtractedName(name);
-    if (name.length > 2 && !names.includes(name) && !name.includes('ل') && name.length < 30 && !/^\+?\d+$/.test(name)) {
-      names.push(name);
-    }
-  }
-  
-  const keywords = ['اسم', 'الاسم', 'name', 'user', 'contact', 'صاحب', 'مالك', 'الشهرة', 'المستخدم', 'العميل'];
-  for (const keyword of keywords) {
-    const regex = new RegExp(`${keyword}[\\s:]*([^\\n<,]+)`, 'gi');
-    let match;
-    while ((match = regex.exec(textContent)) !== null) {
-      let name = match[1];
-      name = cleanExtractedName(name);
-      if (name.length > 2 && !names.includes(name) && /[\u0600-\u06FF]/.test(name) && !/^\+?\d+$/.test(name)) {
-        names.push(name);
-      }
-    }
-  }
-  
-  const pattern = /\d+[\s-]+([\u0600-\u06FF\s]+)/g;
-  let patternMatch;
-  while ((patternMatch = pattern.exec(textContent)) !== null) {
-    let name = patternMatch[1];
-    name = cleanExtractedName(name);
-    if (name.length > 2 && !names.includes(name) && !/^\+?\d+$/.test(name)) {
-      names.push(name);
-    }
-  }
-  
-  return [...new Set(names)].slice(0, 200);
+  // إذا كان الاسم موجوداً في قائمة الكلمات العامة المحظورة
+  if (STOP_WORDS.includes(name.trim())) return false;
+
+  // يجب أن يحتوي الاسم على حروف عربية أو إنجليزية حقيقية
+  if (!/[\u0600-\u06FFa-zA-Z]/.test(name)) return false;
+
+  return true;
 }
 
 function cleanExtractedName(name) {
@@ -220,6 +117,70 @@ function cleanExtractedName(name) {
     .replace(/\b(info|country|n|null|undefined|الرقم|اسم|search|phone|نتائج|البحث|للرقم|الشهرة|السجلات|المكتشفة|الأكثر|شيوعاً|اليمن|من|هذا|هذه|كان|مع|عن|على|الى|حتى|بين|أو|و|ف|في|إلى|على|عن|من|إلى|عند|ب|ك|ل|لل|و|ثم|حتى|لكن|ولا|أو|ثم|حيث|بين|عندما|ذلك|هذه|هذا|التي|الذي|الذين|اللاتي|اللواتي|منذ|خلال|بسبب|دون|بينما|حيثما|كلما|متى|أين|كيف|إذا|لن|لم|ما|لا|ليس|سوف|قد|ربما|لعل|ليت|لابد|لعل|لكي|كي|حتّى|حتى)\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function extractNamesFromJSON(jsonData) {
+  const names = [];
+  try {
+    const text = typeof jsonData === 'string' ? jsonData : (jsonData.result || JSON.stringify(jsonData));
+    if (text) {
+      const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
+      if (fameMatch) {
+        let name = cleanExtractedName(fameMatch[1]);
+        if (isRealName(name) && !names.includes(name)) names.push(name);
+      }
+      
+      const numberedMatches = text.match(/\d+\s*[-–—]\s*([^\d\n]+)/g);
+      if (numberedMatches) {
+        numberedMatches.forEach(m => {
+          const nameMatch = m.match(/\d+\s*[-–—]\s*([^\d\n]+)/);
+          if (nameMatch) {
+            let name = cleanExtractedName(nameMatch[1]);
+            if (isRealName(name) && !names.includes(name)) names.push(name);
+          }
+        });
+      }
+    }
+  } catch (e) {
+    console.error('خطأ في استخراج الأسماء من JSON:', e);
+  }
+  return [...new Set(names)].slice(0, 200);
+}
+
+function extractNamesFromResponse(html) {
+  const names = [];
+  const numberedPattern = /(\d+)\s*[-–—]\s*([^\d\n<]+)/g;
+  let match;
+  while ((match = numberedPattern.exec(html)) !== null) {
+    let name = cleanExtractedName(match[2]);
+    if (isRealName(name) && !names.includes(name)) names.push(name);
+  }
+  
+  const nameTags = /<[^>]*name[^>]*>([^<]+)<\/[^>]*>/gi;
+  let tagMatch;
+  while ((tagMatch = nameTags.exec(html)) !== null) {
+    let name = cleanExtractedName(tagMatch[1]);
+    if (isRealName(name) && !names.includes(name)) names.push(name);
+  }
+  
+  return [...new Set(names)].slice(0, 200);
+}
+
+function extractNamesAlternative(html) {
+  const names = [];
+  const textContent = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+  
+  const keywords = ['اسم', 'الاسم', 'name', 'user', 'contact', 'صاحب', 'مالك', 'الشهرة', 'المستخدم', 'العميل'];
+  for (const keyword of keywords) {
+    const regex = new RegExp(`${keyword}[\\s:]*([^\\n<,]+)`, 'gi');
+    let match;
+    while ((match = regex.exec(textContent)) !== null) {
+      let name = cleanExtractedName(match[1]);
+      if (isRealName(name) && !names.includes(name)) names.push(name);
+    }
+  }
+  
+  return [...new Set(names)].slice(0, 200);
 }
 
 function detectProvider(cleanPhone) {
@@ -334,20 +295,17 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🌐 [المستوى 3] جلب عبر ScrapingBee 🐝 (محاكاة الهيدرات الكاملة)
+    // 🌐 [المستوى 3] جلب عبر ScrapingBee 🐝
     // ==========================================================
     let names = [];
     let success = false;
     let lastError = null;
     let source = '';
-    let rawData = null;
 
-    // توليد Referer بنفس التشفير الذي يستخدمه الموقع (Base64 للرقم مع K)
     const base64Phone = Buffer.from(scrapePhone).toString('base64');
     const dynamicReferer = `https://b.raw2fid.net/calle/?res_id=K${base64Phone}%3D%3D`;
     const timestamp = Date.now();
 
-    // الترويسات الرسمية المستخرجة من DevTools
     const browserHeaders = {
       'accept': '*/*',
       'accept-language': 'en-US,en;q=0.9,ar;q=0.8',
@@ -368,14 +326,13 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       
       try {
         const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
-        console.log(`📡 جلب البيانات من: ${targetUrl}`);
         
         const scrapingBeeUrl = new URL('https://app.scrapingbee.com/api/v1/');
         scrapingBeeUrl.searchParams.append('api_key', SCRAPINGBEE_API_KEY);
         scrapingBeeUrl.searchParams.append('url', targetUrl);
         scrapingBeeUrl.searchParams.append('render_js', 'false');
-        scrapingBeeUrl.searchParams.append('forward_headers', 'true'); // تمرير الهيدرات المحاكية
-        scrapingBeeUrl.searchParams.append('premium_proxy', 'true');   // لتجاوز حظر الـ IPs
+        scrapingBeeUrl.searchParams.append('forward_headers', 'true');
+        scrapingBeeUrl.searchParams.append('premium_proxy', 'true');
 
         const response = await fetch(scrapingBeeUrl.toString(), {
           method: 'GET',
@@ -384,10 +341,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         
         if (response.ok) {
           const responseContent = await response.text();
-          rawData = responseContent;
-          console.log('✅ استجابة ScrapingBee مستلمة');
 
-          // 1. محاولة معالجة النتيجة كـ JSON
           try {
             const parsedJson = JSON.parse(responseContent);
             const extractedNames = extractNamesFromJSON(parsedJson);
@@ -395,13 +349,9 @@ app.all('/api/search', rateLimiter, async (req, res) => {
               names = extractedNames;
               success = true;
               source = 'scrapingbee_json';
-              console.log(`✅ استخراج ${names.length} اسم من ScrapingBee (JSON)`);
             }
-          } catch (e) {
-            // المحتوى ليس JSON
-          }
+          } catch (e) {}
 
-          // 2. محاولة معالجة النتيجة كـ HTML
           if (!success || names.length === 0) {
             if (responseContent && responseContent.length >= 20) {
               const extractedNames = extractNamesFromResponse(responseContent);
@@ -409,58 +359,41 @@ app.all('/api/search', rateLimiter, async (req, res) => {
                 names = extractedNames;
                 success = true;
                 source = 'scrapingbee_html';
-                console.log(`✅ استخراج ${names.length} اسم من ScrapingBee (HTML)`);
               } else {
                 const alternativeNames = extractNamesAlternative(responseContent);
                 if (alternativeNames.length > 0) {
                   names = alternativeNames;
                   success = true;
                   source = 'scrapingbee_alternative';
-                  console.log(`✅ استخراج ${names.length} اسم (طريقة بديلة)`);
                 }
               }
             }
           }
         } else {
-          const errorText = await response.text();
-          console.log(`⚠️ فشل ScrapingBee: ${response.status} - ${errorText}`);
           lastError = `ScrapingBee error: ${response.status}`;
         }
       } catch (e) {
-        console.error('❌ خطأ في ScrapingBee:', e);
         lastError = `ScrapingBee exception: ${e.message}`;
       }
-    } else {
-      console.log('⚠️ مفتاح ScrapingBee غير موجود');
-      lastError = 'مفتاح ScrapingBee غير موجود';
     }
 
     // ==========================================================
-    // 🔄 المحاولة البديلة: جلب مباشر (GET محاكاة المتصفح الدقيقة)
+    // 🔄 المحاولة البديلة: جلب مباشر
     // ==========================================================
     if (!success || names.length === 0) {
-      console.log('🔄 محاولة الجلب المباشر عبر المحاكاة...');
-      
       try {
         const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
-        
-        const response = await fetch(targetUrl, {
-          method: 'GET',
-          headers: browserHeaders
-        });
+        const response = await fetch(targetUrl, { method: 'GET', headers: browserHeaders });
         
         if (response.ok) {
           const responseText = await response.text();
-          
           try {
             const jsonData = JSON.parse(responseText);
-            rawData = jsonData;
             const extractedNames = extractNamesFromJSON(jsonData);
             if (extractedNames.length > 0) {
               names = extractedNames;
               success = true;
               source = 'direct_json';
-              console.log(`✅ استخراج ${names.length} اسم من JSON مباشر`);
             }
           } catch (e) {
             if (responseText && responseText.length >= 20) {
@@ -469,7 +402,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
                 names = extractedNames;
                 success = true;
                 source = 'direct_scrape';
-                console.log(`✅ استخراج ${names.length} اسم من HTML مباشر`);
               }
             }
           }
@@ -480,20 +412,14 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 📊 إذا لم يتم العثور على نتائج
+    // 📊 إذا لم يتم العثور على نتائج حقيقية
     // ==========================================================
     if (!success || names.length === 0) {
       return res.status(200).json({
         success: false,
         results: [],
         total: 0,
-        error: lastError || 'لم يتم العثور على نتائج',
-        debug: {
-          phone: scrapePhone,
-          provider: provider,
-          has_scrapingbee_key: !!SCRAPINGBEE_API_KEY,
-          source: source
-        }
+        error: lastError || 'لم يتم العثور على نتائج'
       });
     }
 
@@ -518,13 +444,11 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     return res.status(200).json(finalResponseData);
 
   } catch (e) {
-    console.error('❌ خطأ عام:', e);
     return res.status(500).json({
       success: false,
       results: [],
       total: 0,
-      error: e.message,
-      stack: e.stack
+      error: e.message
     });
   }
 });
@@ -534,6 +458,4 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 // ==========================================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 تشغيل خادم Node.js على المنفذ ${PORT}`);
-  console.log(`🐝 ScrapingBee API Key: ${SCRAPINGBEE_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
-  console.log(`🔑 المفتاح: ${SCRAPINGBEE_API_KEY ? SCRAPINGBEE_API_KEY.substring(0, 15) + '...' : 'غير موجود'}`);
 });
