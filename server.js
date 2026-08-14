@@ -59,8 +59,6 @@ const rateLimiter = rateLimit({
 // ==========================================================
 // 🌐 متغيرات البيئة ومفتاح ScrapingAPI
 // ==========================================================
-const SUPABASE_URL = process.env.SUPABASE_URL || "https://qfcsaiyuyxhibidrrmha.supabase.co";
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
 const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "81642fe717b80c9fd3093d74795f65f5";
 
 // إنشاء مثيلات
@@ -232,62 +230,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🛡️ [المستوى 2] قراءة من Supabase
-    // ==========================================================
-    if (SUPABASE_ANON_KEY) {
-      try {
-        console.log(`🔎 البحث في Supabase عن: ${databasePhone}`);
-        
-        const dbResponse = await fetch(
-          `${SUPABASE_URL}/rest/v1/numbers?phone=eq.${databasePhone}&select=*`,
-          {
-            headers: {
-              'apikey': SUPABASE_ANON_KEY,
-              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-            }
-          }
-        );
-
-        if (dbResponse.ok) {
-          const existingRecords = await dbResponse.json();
-          if (existingRecords && existingRecords.length > 0) {
-            console.log(`✅ تم العثور على الرقم في Supabase!`);
-            
-            const results = existingRecords.map((rec) => {
-              const name = rec.name || rec.contact_name || rec.full_name || rec.username || 'اسم غير معروف';
-              const phone = rec.phone || rec.phone_number || databasePhone;
-              const src = rec.source || rec.data_source || 'قاعدة البيانات';
-              const prov = rec.provider || rec.telecom || provider;
-              const date = rec.created_at || rec.added_at || new Date().toISOString();
-
-              return {
-                name: name,
-                phone: phone,
-                source: src,
-                provider: prov,
-                formattedDate: new Date(date).toLocaleDateString('ar-EG')
-              };
-            });
-
-            const finalResponseData = {
-              success: true,
-              results,
-              total: results.length,
-              source: 'supabase_cache',
-              cached_at: new Date().toISOString()
-            };
-
-            await cache.put(cacheKey, finalResponseData);
-            return res.status(200).json(finalResponseData);
-          }
-        }
-      } catch (dbErr) {
-        console.error('❌ خطأ في Supabase:', dbErr);
-      }
-    }
-
-    // ==========================================================
-    // 🌐 [المستوى 3] المحاولة الأولى: جلب مباشر لتوفير الـ Credits
+    // 🌐 [المستوى 2] المحاولة الأولى: جلب مباشر لتوفير الـ Credits
     // ==========================================================
     let names = [];
     let success = false;
@@ -346,7 +289,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🐝 [المستوى 4] ScrapingAPI (خيار بديل عند فشل المباشر)
+    // 🐝 [المستوى 3] ScrapingAPI (خيار بديل عند فشل المباشر)
     // ==========================================================
     if ((!success || names.length === 0) && SCRAPINGAPI_API_KEY) {
       console.log('🐝 الجلب المباشر لم ينجح، استخدام ScrapingAPI...');
