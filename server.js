@@ -2,41 +2,24 @@ const express = require('express');
 const cors = require('cors');
 const NodeCache = require('node-cache');
 const rateLimit = require('express-rate-limit');
+const { HttpsProxyAgent } = require('https-proxy-agent'); // أداة دعم البروكسي
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ==========================================================
-// 📊 نظام الكاش (Memory Cache)
-// ==========================================================
-
 class MemoryCache {
   constructor() {
     this.cache = new NodeCache({ stdTTL: 2592000, checkperiod: 86400 });
   }
-
-  async match(requestKey) {
-    const entry = this.cache.get(requestKey);
-    if (!entry) return null;
-    return entry;
-  }
-
-  async put(requestKey, responseData) {
-    this.cache.set(requestKey, responseData);
-  }
-
-  cleanup() {
-    // NodeCache يقوم بالتنظيف تلقائياً
-  }
+  async match(key) { return this.cache.get(key) || null; }
+  async put(key, data) { this.cache.set(key, data); }
+  cleanup() {}
 }
 
-// ==========================================================
-// 📊 نظام تحديد المعدل (Rate Limiting)
-// ==========================================================
 const rateLimiter = rateLimit({
-  windowMs: 3 * 1000, // 3 ثواني
-  max: 1, // طلب واحد لكل IP
+  windowMs: 3 * 1000,
+  max: 1,
   message: JSON.stringify({
     success: false,
     results: [],
@@ -44,166 +27,80 @@ const rateLimiter = rateLimit({
     error: 'مهلاً! الرجاء الانتظار',
     message: '⏳ يرجى الانتظار 3 ثواني بين عمليات البحث'
   }),
-  keyGenerator: (req) => {
-    return req.headers['cf-connecting-ip'] || 
-           req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
-           req.ip ||
-           'anonymous';
-  },
+  keyGenerator: (req) => req.headers['cf-connecting-ip'] || req.ip || 'anonymous',
   handler: (req, res) => {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.status(429).json(JSON.parse(rateLimiter.message));
   }
 });
 
-// ==========================================================
-// 🌐 متغيرات البيئة ومفتاح ScrapingAPI
-// ==========================================================
 const SCRAPING_API_KEY = process.env.SCRAPING_API_KEY || process.env.SCRAPINGBEE_API_KEY || "";
 
-// إنشاء مثيلات
-const cache = new MemoryCache();
-
-console.log('🚀 جاري تشغيل الخادم...');
-console.log(`🐝 ScrapingAPI Key: ${SCRAPING_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
-
 // ==========================================================
-// 🚀 Middleware
+// 🛡️ نظام البروكسيات لتجاوز الحظر وتحديد الطلبات
 // ==========================================================
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type']
-}));
-
-app.use(express.json());
-
-// ==========================================================
-// 📝 دوال استخراج وتنظيف الأسماء
-// ==========================================================
-
-const STOP_WORDS = [
-  'صحيح', 'صحيحة', 'خطأ', 'نعم', 'لا', 'بحث', 'نتائج', 'البحث', 'للرقم', 
-  'اسم', 'الشهرة', 'السجلات', 'المكتشفة', 'الأكثر', 'شيوعاً', 'اليمن', 
-  'سجل', 'تفاصيل', 'بيانات', 'عفواً', 'تأكيد', 'الرقم', 'يرجى', 'الانتظار',
-  'null', 'undefined', 'info', 'country', 'search', 'phone', 'true', 'false'
+// يمكنك وضع بروكسيات هنا أو عبر ملف البيئة .env بهذا الشكل: PROXY_LIST="http://ip1:port,http://ip2:port"
+const envProxies = process.env.PROXY_LIST ? process.env.PROXY_LIST.split(',') : [];
+const PROXIES = envProxies.length > 0 ? envProxies : [
+  // ضع هنا بروكسيات احتياطية مجانية أو مدفوعة إن وجد، مثال:
+  // 'http://username:password@proxy_ip:port',
 ];
 
-function isRealName(name) {
-  if (!name || name.length < 3) return false;
-  if (/^\+?\d+$/.test(name)) return false;
-  if (STOP_WORDS.includes(name.trim())) return false;
-  if (!/[\u0600-\u06FFa-zA-Z]/.test(name)) return false;
-  return true;
+let currentProxyIndex = 0;
+function getNextProxyAgent() {
+  if (PROXIES.length === 0) return null;
+  const proxyUrl = PROXIES[currentProxyIndex].trim();
+  currentProxyIndex = (currentProxyIndex + 1) % PROXIES.length;
+  return new HttpsProxyAgent(proxyUrl);
 }
 
-function cleanExtractedName(name) {
-  if (!name) return '';
-  return name
-    .replace(/نتائج\s*البحث\s*للرقم/gi, '')
-    .replace(/\|{2,}\s*split\s*\|{2,}/gi, '')
-    .replace(/\{.*?\}/g, '')
-    .replace(/[\\{}{}\[\]"':\-_,\/]/g, ' ')
-    .replace(/\b(info|country|n|null|undefined|الرقم|اسم|search|phone|نتائج|البحث|للرقم|الشهرة|السجلات|المكتشفة|الأكثر|شيوعاً|اليمن|من|هذا|هذه|كان|مع|عن|على|الى|حتى|بين|أو|و|ف|في|إلى|على|عن|من|إلى|عند|ب|ك|ل|لل|و|ثم|حتى|لكن|ولا|أو|ثم|حيث|بين|عندما|ذلك|هذه|هذا|التي|الذي|الذين|اللاتي|اللواتي|منذ|خلال|بسبب|دون|بينما|حيثما|كلما|متى|أين|كيف|إذا|لن|لم|ما|لا|ليس|سوف|قد|ربما|لعل|ليت|لابد|لعل|لكي|كي|حتّى|حتى)\b/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+const cache = new MemoryCache();
 
-function extractNamesFromJSON(jsonData) {
+app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
+app.use(express.json());
+
+function parseOriginalApiResponse(rawData) {
   const names = [];
   try {
-    const text = typeof jsonData === 'string' ? jsonData : (jsonData.result || JSON.stringify(jsonData));
-    if (text) {
-      const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
-      if (fameMatch) {
-        let name = cleanExtractedName(fameMatch[1]);
-        if (isRealName(name) && !names.includes(name)) names.push(name);
+    let text = '';
+    if (typeof rawData === 'string') {
+      try {
+        const parsed = JSON.parse(rawData);
+        text = parsed.result || rawData;
+      } catch (e) {
+        text = rawData;
       }
-      
-      const numberedMatches = text.match(/\d+\s*[-–—]\s*([^\d\n]+)/g);
-      if (numberedMatches) {
-        numberedMatches.forEach(m => {
-          const nameMatch = m.match(/\d+\s*[-–—]\s*([^\d\n]+)/);
-          if (nameMatch) {
-            let name = cleanExtractedName(nameMatch[1]);
-            if (isRealName(name) && !names.includes(name)) names.push(name);
-          }
-        });
+    } else if (rawData && typeof rawData === 'object') {
+      text = rawData.result || JSON.stringify(rawData);
+    }
+
+    text = text.replace(/\\"/g, '"').replace(/\\&quot;/g, '"');
+
+    const lines = text.split('\n');
+    for (const line of lines) {
+      const match = line.trim().match(/^\d+[\s\-\–—]+(.+)$/);
+      if (match && match[1]) {
+        let cleanName = match[1].trim();
+        if (cleanName && !names.includes(cleanName) && !cleanName.includes('نتائج البحث للرقم') && !cleanName.includes('الأسماء المرتبطة')) {
+          names.push(cleanName);
+        }
       }
     }
   } catch (e) {
-    console.error('خطأ في استخراج الأسماء من JSON:', e);
+    console.error('خطأ في تحليل استجابة الموقع:', e);
   }
-  return [...new Set(names)].slice(0, 200);
+  return names;
 }
 
-function extractNamesFromResponse(html) {
-  const names = [];
-  const numberedPattern = /(\d+)\s*[-–—]\s*([^\d\n<]+)/g;
-  let match;
-  while ((match = numberedPattern.exec(html)) !== null) {
-    let name = cleanExtractedName(match[2]);
-    if (isRealName(name) && !names.includes(name)) names.push(name);
-  }
-  
-  const nameTags = /<[^>]*name[^>]*>([^<]+)<\/[^>]*>/gi;
-  let tagMatch;
-  while ((tagMatch = nameTags.exec(html)) !== null) {
-    let name = cleanExtractedName(tagMatch[1]);
-    if (isRealName(name) && !names.includes(name)) names.push(name);
-  }
-  
-  return [...new Set(names)].slice(0, 200);
-}
-
-function extractNamesAlternative(html) {
-  const names = [];
-  const textContent = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
-  
-  const keywords = ['اسم', 'الاسم', 'name', 'user', 'contact', 'صاحب', 'مالك', 'الشهرة', 'المستخدم', 'العميل'];
-  for (const keyword of keywords) {
-    const regex = new RegExp(`${keyword}[\\s:]*([^\\n<,]+)`, 'gi');
-    let match;
-    while ((match = regex.exec(textContent)) !== null) {
-      let name = cleanExtractedName(match[1]);
-      if (isRealName(name) && !names.includes(name)) names.push(name);
-    }
-  }
-  
-  return [...new Set(names)].slice(0, 200);
-}
-
-// ==========================================================
-// 🌍 تحديد مزود الخدمة والدولة (شامل الدول العربية)
-// ==========================================================
 function detectProvider(fullNumber) {
-  // الأرقام المحلية اليمنية
   if (/^(77|78)[0-9]{7}$/.test(fullNumber)) return 'يمن موبايل (اليمن)';
   if (/^(73)[0-9]{7}$/.test(fullNumber)) return 'YOU (اليمن)';
   if (/^(71)[0-9]{7}$/.test(fullNumber)) return 'سبأفون (اليمن)';
   if (/^(70)[0-9]{7}$/.test(fullNumber)) return 'واي (اليمن)';
-
-  // الدول العربية عبر مفتاح الدول (International Country Codes)
   if (fullNumber.startsWith('967')) return 'السجلات اليمنية (دولي)';
   if (fullNumber.startsWith('966')) return 'المملكة العربية السعودية';
   if (fullNumber.startsWith('20')) return 'جمهورية مصر العربية';
   if (fullNumber.startsWith('971')) return 'الإمارات العربية المتحدة';
-  if (fullNumber.startsWith('962')) return 'المملكة الأردنية الهاشمية';
-  if (fullNumber.startsWith('964')) return 'جمهورية العراق';
-  if (fullNumber.startsWith('963')) return 'الجمهورية العربية السورية';
-  if (fullNumber.startsWith('961')) return 'الجمهورية اللبنانية';
-  if (fullNumber.startsWith('965')) return 'دولة الكويت';
-  if (fullNumber.startsWith('974')) return 'دولة قطر';
-  if (fullNumber.startsWith('973')) return 'مملكة البحرين';
-  if (fullNumber.startsWith('968')) return 'سلطنة عمان';
-  if (fullNumber.startsWith('970') || fullNumber.startsWith('972')) return 'دولة فلسطين';
-  if (fullNumber.startsWith('249')) return 'جمهورية السودان';
-  if (fullNumber.startsWith('212')) return 'المملكة المغربية';
-  if (fullNumber.startsWith('216')) return 'الجمهورية التونسية';
-  if (fullNumber.startsWith('213')) return 'الجمهورية الجزائرية';
-  if (fullNumber.startsWith('218')) return 'دولة ليبيا';
-  if (fullNumber.startsWith('966')) return 'المملكة العربية السعودية';
-
   return 'رقم عربي / دولي آخر';
 }
 
@@ -212,58 +109,34 @@ function detectProvider(fullNumber) {
 // ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
-    let query = null;
-    if (req.method === 'GET') {
-      query = req.query.query;
-    } else if (req.method === 'POST') {
-      query = req.body.query;
-    }
+    let query = req.method === 'GET' ? req.query.query : req.body.query;
 
     if (!query) {
-      return res.status(200).json({
-        success: false,
-        results: [],
-        total: 0,
-        error: 'البحث فارغ'
-      });
+      return res.status(200).json({ success: false, results: [], total: 0, error: 'البحث فارغ' });
     }
 
     let cleanPhone = query.trim().replace(/\s+/g, '').replace(/[-()]/g, '');
     if (cleanPhone.startsWith('00')) cleanPhone = cleanPhone.substring(2);
     else if (cleanPhone.startsWith('+')) cleanPhone = cleanPhone.substring(1);
 
-    // إذا كان رقم محلي يمني يبدأ بـ 0 بدون مفتاح دولة
     let databasePhone = cleanPhone;
-    if (/^0[7-8][0-9]{8}$/.test(cleanPhone)) {
-      databasePhone = cleanPhone.substring(1); // إزالة الصفر المحلي للاستعلام
+    if (/^0[1-9][0-9]{8,9}$/.test(cleanPhone)) {
+      databasePhone = cleanPhone.substring(1);
     }
 
     const provider = detectProvider(cleanPhone);
-    
-    // تجهيز الرقم لإرساله لعملية البحث
     let scrapePhone = cleanPhone;
-    if (!cleanPhone.startsWith('967') && !cleanPhone.startsWith('966') && !cleanPhone.startsWith('20') && 
-        !cleanPhone.startsWith('971') && !cleanPhone.startsWith('962') && !cleanPhone.startsWith('964') &&
-         /^[7-8][0-9]{8}$/.test(cleanPhone)) {
-      scrapePhone = '967' + cleanPhone; // افتراضي محلي يمني إذا لم يكن به مفتاح دولة
+    if (!scrapePhone.startsWith('+')) {
+      scrapePhone = '+' + scrapePhone;
     }
-    scrapePhone = '+' + scrapePhone;
 
-    // ==========================================================
-    // 🛡️ [المستوى 1] الكاش المحلي
-    // ==========================================================
+    // 1. الكاش المحلي (يحمي الخادم والموقع الخارجي من التكرار)
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = await cache.match(cacheKey);
     if (cachedData) {
-      return res.status(200)
-        .set('X-Cache-Status', 'HIT')
-        .set('X-Cache-Level', 'NODE_MEMORY_CACHE')
-        .json(cachedData);
+      return res.status(200).set('X-Cache-Status', 'HIT').json(cachedData);
     }
 
-    // ==========================================================
-    // 🌐 [المستوى 2] المحاولة الأولى: جلب مباشر
-    // ==========================================================
     let names = [];
     let success = false;
     let lastError = null;
@@ -279,122 +152,72 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       'cache-control': 'no-cache',
       'pragma': 'no-cache',
       'referer': dynamicReferer,
-      'sec-ch-ua': '"Not=A?Brand";v="99", "Google Chrome";v="151", "Chromium";v="151"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
-      'sec-fetch-dest': 'empty',
-      'sec-fetch-mode': 'cors',
-      'sec-fetch-site': 'same-origin',
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'
     };
 
-    console.log('🔄 محاولة الجلب المباشر أولاً...');
+    // 2. محاولة الجلب المباشر (مع دعم تدوير البروكسي إن وُجدت)
     try {
       const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
-      const response = await fetch(targetUrl, { method: 'GET', headers: browserHeaders });
+      
+      const fetchOptions = { method: 'GET', headers: browserHeaders };
+      const agent = getNextProxyAgent();
+      if (agent) fetchOptions.agent = agent;
+
+      const response = await fetch(targetUrl, fetchOptions);
       
       if (response.ok) {
         const responseText = await response.text();
-        try {
-          const jsonData = JSON.parse(responseText);
-          const extractedNames = extractNamesFromJSON(jsonData);
-          if (extractedNames.length > 0) {
-            names = extractedNames;
-            success = true;
-            source = 'direct_json';
-            console.log(`✅ تم الاستخراج بنجاح عبر الجلب المباشر (${names.length} اسم)`);
-          }
-        } catch (e) {
-          if (responseText && responseText.length >= 20) {
-            const extractedNames = extractNamesFromResponse(responseText);
-            if (extractedNames.length > 0) {
-              names = extractedNames;
-              success = true;
-              source = 'direct_scrape';
-              console.log(`✅ تم الاستخراج بنجاح عبر الجلب المباشر (HTML)`);
-            }
-          }
+        const extracted = parseOriginalApiResponse(responseText);
+        if (extracted.length > 0) {
+          names = extracted;
+          success = true;
+          source = 'direct_api';
         }
+      } else {
+        lastError = `Direct fetch failed with status: ${response.status}`;
       }
     } catch (e) {
-      console.log(`⚠️ فشل الجلب المباشر: ${e.message}`);
+      lastError = e.message;
     }
 
-    // ==========================================================
-    // 🐝 [المستوى 3] استخدام ScrapingAPI (عند فشل الجلب المباشر)
-    // ==========================================================
+    // 3. استخدام ScrapingAPI كخط دفاع ثاني وقوي جداً (لا يحظر أبداً لأنه يستخدم شبكة بروكسيات مدفوعة خاصة به)
     if ((!success || names.length === 0) && SCRAPING_API_KEY) {
-      console.log('🐝 الجلب المباشر لم ينجح، استخدام ScrapingAPI...');
-      
       try {
         const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
-        
         const scrapingApiUrl = new URL('https://api.scrapingapi.com/v1/');
         scrapingApiUrl.searchParams.append('api_key', SCRAPING_API_KEY);
         scrapingApiUrl.searchParams.append('url', targetUrl);
         scrapingApiUrl.searchParams.append('render_js', 'false');
-        scrapingApiUrl.searchParams.append('premium_proxy', 'false');
 
-        const response = await fetch(scrapingApiUrl.toString(), {
-          method: 'GET',
-          headers: browserHeaders
-        });
+        const response = await fetch(scrapingApiUrl.toString(), { method: 'GET', headers: browserHeaders });
         
         if (response.ok) {
           const responseContent = await response.text();
-
-          try {
-            const parsedJson = JSON.parse(responseContent);
-            const extractedNames = extractNamesFromJSON(parsedJson);
-            if (extractedNames.length > 0) {
-              names = extractedNames;
-              success = true;
-              source = 'scrapingapi_json';
-            }
-          } catch (e) {}
-
-          if (!success || names.length === 0) {
-            if (responseContent && responseContent.length >= 20) {
-              const extractedNames = extractNamesFromResponse(responseContent);
-              if (extractedNames.length > 0) {
-                names = extractedNames;
-                success = true;
-                source = 'scrapingapi_html';
-              } else {
-                const alternativeNames = extractNamesAlternative(responseContent);
-                if (alternativeNames.length > 0) {
-                  names = alternativeNames;
-                  success = true;
-                  source = 'scrapingapi_alternative';
-                }
-              }
-            }
+          const extracted = parseOriginalApiResponse(responseContent);
+          if (extracted.length > 0) {
+            names = extracted;
+            success = true;
+            source = 'scrapingapi';
           }
-        } else {
-          lastError = `ScrapingAPI error: ${response.status}`;
         }
       } catch (e) {
-        lastError = `ScrapingAPI exception: ${e.message}`;
+        lastError = e.message;
       }
     }
 
-    // ==========================================================
-    // 📊 إذا لم يتم العثور على نتائج حقيقية
-    // ==========================================================
     if (!success || names.length === 0) {
       return res.status(200).json({
         success: false,
         results: [],
         total: 0,
-        error: lastError || 'لم يتم العثور على نتائج'
+        error: lastError || 'عفواً، تم الوصول للحد الأقصى أو لم يتم العثور على نتائج. يجدر استخدام مفتاح ScrapingAPI لتجاوز الحظر نهائياً.'
       });
     }
 
-    // --- تجهيز النتيجة ---
     const results = names.map(name => ({
       name: name,
       phone: databasePhone,
-      source: source.includes('scrapingapi') ? 'ScrapingAPI' : 'مباشر',
+      source: source,
       provider: provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
@@ -411,18 +234,10 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     return res.status(200).json(finalResponseData);
 
   } catch (e) {
-    return res.status(500).json({
-      success: false,
-      results: [],
-      total: 0,
-      error: e.message
-    });
+    return res.status(500).json({ success: false, results: [], total: 0, error: e.message });
   }
 });
 
-// ==========================================================
-// 🚀 تشغيل الخادم
-// ==========================================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 تشغيل خادم Node.js على المنفذ ${PORT}`);
 });
