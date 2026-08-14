@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const NodeCache = require('node-cache');
 const rateLimit = require('express-rate-limit');
-const { HttpsProxyAgent } = require('https-proxy-agent'); // أداة دعم البروكسي
 require('dotenv').config();
 
 const app = express();
@@ -35,30 +34,14 @@ const rateLimiter = rateLimit({
 });
 
 const SCRAPING_API_KEY = process.env.SCRAPING_API_KEY || process.env.SCRAPINGBEE_API_KEY || "";
-
-// ==========================================================
-// 🛡️ نظام البروكسيات لتجاوز الحظر وتحديد الطلبات
-// ==========================================================
-// يمكنك وضع بروكسيات هنا أو عبر ملف البيئة .env بهذا الشكل: PROXY_LIST="http://ip1:port,http://ip2:port"
-const envProxies = process.env.PROXY_LIST ? process.env.PROXY_LIST.split(',') : [];
-const PROXIES = envProxies.length > 0 ? envProxies : [
-  // ضع هنا بروكسيات احتياطية مجانية أو مدفوعة إن وجد، مثال:
-  // 'http://username:password@proxy_ip:port',
-];
-
-let currentProxyIndex = 0;
-function getNextProxyAgent() {
-  if (PROXIES.length === 0) return null;
-  const proxyUrl = PROXIES[currentProxyIndex].trim();
-  currentProxyIndex = (currentProxyIndex + 1) % PROXIES.length;
-  return new HttpsProxyAgent(proxyUrl);
-}
-
 const cache = new MemoryCache();
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json());
 
+// ==========================================================
+// 📝 دالة استخراج الأسماء بدقة تامة مطابقة للموقع الأصلي
+// ==========================================================
 function parseOriginalApiResponse(rawData) {
   const names = [];
   try {
@@ -130,7 +113,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       scrapePhone = '+' + scrapePhone;
     }
 
-    // 1. الكاش المحلي (يحمي الخادم والموقع الخارجي من التكرار)
+    // 1. الكاش المحلي
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = await cache.match(cacheKey);
     if (cachedData) {
@@ -155,15 +138,10 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'
     };
 
-    // 2. محاولة الجلب المباشر (مع دعم تدوير البروكسي إن وُجدت)
+    // 2. الجلب المباشر
     try {
       const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
-      
-      const fetchOptions = { method: 'GET', headers: browserHeaders };
-      const agent = getNextProxyAgent();
-      if (agent) fetchOptions.agent = agent;
-
-      const response = await fetch(targetUrl, fetchOptions);
+      const response = await fetch(targetUrl, { method: 'GET', headers: browserHeaders });
       
       if (response.ok) {
         const responseText = await response.text();
@@ -180,7 +158,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       lastError = e.message;
     }
 
-    // 3. استخدام ScrapingAPI كخط دفاع ثاني وقوي جداً (لا يحظر أبداً لأنه يستخدم شبكة بروكسيات مدفوعة خاصة به)
+    // 3. استخدام ScrapingAPI (لتجاوز الحظر تماماً)
     if ((!success || names.length === 0) && SCRAPING_API_KEY) {
       try {
         const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
@@ -210,7 +188,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         success: false,
         results: [],
         total: 0,
-        error: lastError || 'عفواً، تم الوصول للحد الأقصى أو لم يتم العثور على نتائج. يجدر استخدام مفتاح ScrapingAPI لتجاوز الحظر نهائياً.'
+        error: lastError || 'عفواً، لم يتم العثور على نتائج أو تم الوصول للحد الأقصى.'
       });
     }
 
