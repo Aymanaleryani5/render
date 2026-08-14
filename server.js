@@ -61,7 +61,7 @@ const rateLimiter = rateLimit({
 // ==========================================================
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://qfcsaiyuyxhibidrrmha.supabase.co";
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
-const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY || "N970F9TMBRTTLJ7NYK87L9INKZ0QQMMKJN2X1XTG93Q9ZUUT82NB15G60ZN00I80A6W4XXVMI7O4NA8B";
+const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY || "0SXVV2GZ5FDJI5FZNPG2KK5L7T2NP1APNA37I18BTMJPIJDRX7RQYTZ81H6O69VMI3L5RV4YQ7E1THAQ";
 
 // إنشاء مثيلات
 const cache = new MemoryCache();
