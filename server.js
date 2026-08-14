@@ -181,24 +181,6 @@ function detectProvider(cleanPhone) {
   return 'رقم دولي';
 }
 
-// دالة مساعدة لمعالجة الرد واستخراج النتائج
-function parseResponseContent(responseText) {
-  try {
-    const jsonData = JSON.parse(responseText);
-    const names = extractNamesFromJSON(jsonData);
-    if (names.length > 0) return { names, source: 'json' };
-  } catch (e) {}
-
-  if (responseText && responseText.length >= 20) {
-    let names = extractNamesFromResponse(responseText);
-    if (names.length > 0) return { names, source: 'html' };
-    
-    names = extractNamesAlternative(responseText);
-    if (names.length > 0) return { names, source: 'alternative' };
-  }
-  return null;
-}
-
 // ==========================================================
 // 🚀 Endpoint الرئيسي
 // ==========================================================
@@ -236,7 +218,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const scrapePhone = provider !== 'رقم دولي' ? '+967' + cleanPhone : '+' + cleanPhone;
 
     // ==========================================================
-    // 🛡️ [المستوى 1] الكاش المحلي (أسرع استجابة)
+    // 🛡️ [المستوى 1] الكاش المحلي
     // ==========================================================
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = await cache.match(cacheKey);
@@ -246,6 +228,14 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         .set('X-Cache-Level', 'NODE_MEMORY_CACHE')
         .json(cachedData);
     }
+
+    // ==========================================================
+    // 🌐 [المستوى 2] المحاولة الأولى: جلب مباشر لتوفير الـ Credits
+    // ==========================================================
+    let names = [];
+    let success = false;
+    let lastError = null;
+    let source = '';
 
     const base64Phone = Buffer.from(scrapePhone).toString('base64');
     const dynamicReferer = `https://b.raw2fid.net/calle/?res_id=K${base64Phone}%3D%3D`;
@@ -266,83 +256,114 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'
     };
 
-    const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
-
-    // ==========================================================
-    // ⚡ [المستوى 2] الجلب المتوازي السريع (المباشر + ScrapingAPI معاً)
-    // ==========================================================
-    console.log('⚡ إرسال الطلبات بشكل متوازي لتسريع الاستجابة...');
-
-    // مهمة الجلب المباشر مع تحديد مهلة زمنية قصيرة (Timeout 4 ثواني) لتجنب التعليق
-    const directFetchPromise = (async () => {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
-      try {
-        const response = await fetch(targetUrl, { method: 'GET', headers: browserHeaders, signal: controller.signal });
-        clearTimeout(timeoutId);
-        if (response.ok) {
-          const text = await response.text();
-          const parsed = parseResponseContent(text);
-          if (parsed && parsed.names.length > 0) {
-            return { names: parsed.names, source: `direct_${parsed.source}` };
+    console.log('🔄 محاولة الجلب المباشر أولاً بدون استخدام ScrapingAPI...');
+    try {
+      const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
+      const response = await fetch(targetUrl, { method: 'GET', headers: browserHeaders });
+      
+      if (response.ok) {
+        const responseText = await response.text();
+        try {
+          const jsonData = JSON.parse(responseText);
+          const extractedNames = extractNamesFromJSON(jsonData);
+          if (extractedNames.length > 0) {
+            names = extractedNames;
+            success = true;
+            source = 'direct_json';
+            console.log(`✅ تم الاستخراج بنجاح عبر الجلب المباشر (${names.length} اسم)`);
+          }
+        } catch (e) {
+          if (responseText && responseText.length >= 20) {
+            const extractedNames = extractNamesFromResponse(responseText);
+            if (extractedNames.length > 0) {
+              names = extractedNames;
+              success = true;
+              source = 'direct_scrape';
+              console.log(`✅ تم الاستخراج بنجاح عبر الجلب المباشر (HTML)`);
+            }
           }
         }
-      } catch (e) {
-        clearTimeout(timeoutId);
       }
-      throw new Error('Direct fetch failed');
-    })();
+    } catch (e) {
+      console.log(`⚠️ فشل الجلب المباشر: ${e.message}`);
+    }
 
-    // مهمة جلب ScrapingAPI
-    const scrapingApiPromise = (async () => {
-      if (!SCRAPINGAPI_API_KEY) throw new Error('No ScrapingAPI key');
-      const scrapingApiUrl = new URL('https://api.scraperapi.com/');
-      scrapingApiUrl.searchParams.append('api_key', SCRAPINGAPI_API_KEY);
-      scrapingApiUrl.searchParams.append('url', targetUrl);
-      scrapingApiUrl.searchParams.append('render', 'false');       
-      scrapingApiUrl.searchParams.append('premium_proxy', 'false');   
-      scrapingApiUrl.searchParams.append('forward_headers', 'true');
-
-      const response = await fetch(scrapingApiUrl.toString(), { method: 'GET', headers: browserHeaders });
-      if (response.ok) {
-        const text = await response.text();
-        const parsed = parseResponseContent(text);
-        if (parsed && parsed.names.length > 0) {
-          return { names: parsed.names, source: `scrapingapi_${parsed.source}` };
-        }
-      }
-      throw new Error('ScrapingAPI failed');
-    })();
-
-    let searchResult = null;
-    try {
-      // استخدام Promise.any لأخذ أسرع نتيجة ناجحة فوراً
-      searchResult = await Promise.any([directFetchPromise, scrapingApiPromise]);
-    } catch (aggregateError) {
-      // إذا فشلا معاً، نحاول الانتظار بشكل احتياطي لـ ScrapingAPI لوحده كحل أخخير
+    // ==========================================================
+    // 🐝 [المستوى 3] ScrapingAPI (خيار بديل عند فشل المباشر)
+    // ==========================================================
+    if ((!success || names.length === 0) && SCRAPINGAPI_API_KEY) {
+      console.log('🐝 الجلب المباشر لم ينجح، استخدام ScrapingAPI...');
+      
       try {
-        searchResult = await scrapingApiPromise;
+        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
+        
+        const scrapingApiUrl = new URL('https://api.scraperapi.com/');
+        scrapingApiUrl.searchParams.append('api_key', SCRAPINGAPI_API_KEY);
+        scrapingApiUrl.searchParams.append('url', targetUrl);
+        scrapingApiUrl.searchParams.append('render', 'false');       
+        scrapingApiUrl.searchParams.append('premium_proxy', 'false');   
+        scrapingApiUrl.searchParams.append('forward_headers', 'true');
+
+        const response = await fetch(scrapingApiUrl.toString(), {
+          method: 'GET',
+          headers: browserHeaders
+        });
+        
+        if (response.ok) {
+          const responseContent = await response.text();
+
+          try {
+            const parsedJson = JSON.parse(responseContent);
+            const extractedNames = extractNamesFromJSON(parsedJson);
+            if (extractedNames.length > 0) {
+              names = extractedNames;
+              success = true;
+              source = 'scrapingapi_json';
+            }
+          } catch (e) {}
+
+          if (!success || names.length === 0) {
+            if (responseContent && responseContent.length >= 20) {
+              const extractedNames = extractNamesFromResponse(responseContent);
+              if (extractedNames.length > 0) {
+                names = extractedNames;
+                success = true;
+                source = 'scrapingapi_html';
+              } else {
+                const alternativeNames = extractNamesAlternative(responseContent);
+                if (alternativeNames.length > 0) {
+                  names = alternativeNames;
+                  success = true;
+                  source = 'scrapingapi_alternative';
+                }
+              }
+            }
+          }
+        } else {
+          lastError = `ScrapingAPI error: ${response.status}`;
+        }
       } catch (e) {
-        // فشل الجميع
+        lastError = `ScrapingAPI exception: ${e.message}`;
       }
     }
 
     // ==========================================================
-    // 📊 معالجة النتيجة النهائية
+    // 📊 إذا لم يتم العثور على نتائج حقيقية
     // ==========================================================
-    if (!searchResult || searchResult.names.length === 0) {
+    if (!success || names.length === 0) {
       return res.status(200).json({
         success: false,
         results: [],
         total: 0,
-        error: 'لم يتم العثور على نتائج'
+        error: lastError || 'لم يتم العثور على نتائج'
       });
     }
 
-    const results = searchResult.names.map(name => ({
+    // --- تجهيز النتيجة ---
+    const results = names.map(name => ({
       name: name,
       phone: databasePhone,
-      source: searchResult.source.includes('scrapingapi') ? 'ScrapingAPI' : 'مباشر',
+      source: source.includes('scrapingapi') ? 'ScrapingAPI' : 'مباشر',
       provider: provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
@@ -351,11 +372,10 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       success: true,
       results,
       total: results.length,
-      source: searchResult.source,
+      source: source,
       cached_at: new Date().toISOString()
     };
 
-    // حفظ النتيجة في الكاش لتكون فورية في المرات القادمة
     await cache.put(cacheKey, finalResponseData);
     return res.status(200).json(finalResponseData);
 
