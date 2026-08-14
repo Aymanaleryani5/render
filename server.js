@@ -39,9 +39,18 @@ const cache = new MemoryCache();
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json());
 
-// ==========================================================
-// 📝 دالة استخراج الأسماء بدقة تامة مطابقة للموقع الأصلي
-// ==========================================================
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148'
+];
+
+function getRandomUserAgent() {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
 function parseOriginalApiResponse(rawData) {
   const names = [];
   try {
@@ -87,9 +96,6 @@ function detectProvider(fullNumber) {
   return 'رقم عربي / دولي آخر';
 }
 
-// ==========================================================
-// 🚀 Endpoint الرئيسي
-// ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
     let query = req.method === 'GET' ? req.query.query : req.body.query;
@@ -113,7 +119,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       scrapePhone = '+' + scrapePhone;
     }
 
-    // 1. الكاش المحلي
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = await cache.match(cacheKey);
     if (cachedData) {
@@ -123,51 +128,64 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     let names = [];
     let success = false;
     let lastError = null;
-    let source = '';
+    let source = 'direct_optimized';
 
     const base64Phone = Buffer.from(scrapePhone).toString('base64');
     const dynamicReferer = `https://b.raw2fid.net/calle/?res_id=K${base64Phone}%3D%3D`;
     const timestamp = Date.now();
+    const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
 
-    const browserHeaders = {
-      'accept': '*/*',
-      'accept-language': 'en-US,en;q=0.9,ar;q=0.8',
-      'cache-control': 'no-cache',
-      'pragma': 'no-cache',
-      'referer': dynamicReferer,
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'
-    };
+    // 1. محاولة الجلب المباشر مع تدوير الـ User-Agents
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const dynamicHeaders = {
+          'accept': 'application/json, text/javascript, */*; q=0.01',
+          'accept-language': 'ar,en-US;q=0.9,en;q=0.8',
+          'cache-control': 'no-cache',
+          'pragma': 'no-cache',
+          'x-requested-with': 'XMLHttpRequest',
+          'referer': dynamicReferer,
+          'user-agent': getRandomUserAgent()
+        };
 
-    // 2. الجلب المباشر
-    try {
-      const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
-      const response = await fetch(targetUrl, { method: 'GET', headers: browserHeaders });
-      
-      if (response.ok) {
-        const responseText = await response.text();
-        const extracted = parseOriginalApiResponse(responseText);
-        if (extracted.length > 0) {
-          names = extracted;
-          success = true;
-          source = 'direct_api';
+        const response = await fetch(targetUrl, { method: 'GET', headers: dynamicHeaders });
+        
+        if (response.ok) {
+          const responseText = await response.text();
+          const extracted = parseOriginalApiResponse(responseText);
+          if (extracted.length > 0) {
+            names = extracted;
+            success = true;
+            source = 'direct_optimized';
+            break;
+          }
+        } else {
+          lastError = `HTTP Error: ${response.status}`;
         }
-      } else {
-        lastError = `Direct fetch failed with status: ${response.status}`;
+      } catch (e) {
+        lastError = e.message;
       }
-    } catch (e) {
-      lastError = e.message;
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // 3. استخدام ScrapingAPI (لتجاوز الحظر تماماً)
+    // 2. خط الدفاع الاحتياطي الآلي باستخدام ScrapingAPI تلقائياً في حال توفر المفتاح لتجاوز الحظر الجذري
     if ((!success || names.length === 0) && SCRAPING_API_KEY) {
       try {
-        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
         const scrapingApiUrl = new URL('https://api.scrapingapi.com/v1/');
         scrapingApiUrl.searchParams.append('api_key', SCRAPING_API_KEY);
         scrapingApiUrl.searchParams.append('url', targetUrl);
         scrapingApiUrl.searchParams.append('render_js', 'false');
 
-        const response = await fetch(scrapingApiUrl.toString(), { method: 'GET', headers: browserHeaders });
+        const fallbackHeaders = {
+          'accept': '*/*',
+          'accept-language': 'en-US,en;q=0.9,ar;q=0.8',
+          'cache-control': 'no-cache',
+          'pragma': 'no-cache',
+          'referer': dynamicReferer,
+          'user-agent': getRandomUserAgent()
+        };
+
+        const response = await fetch(scrapingApiUrl.toString(), { method: 'GET', headers: fallbackHeaders });
         
         if (response.ok) {
           const responseContent = await response.text();
@@ -175,7 +193,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
           if (extracted.length > 0) {
             names = extracted;
             success = true;
-            source = 'scrapingapi';
+            source = 'scrapingapi_fallback';
           }
         }
       } catch (e) {
