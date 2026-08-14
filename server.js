@@ -57,17 +57,15 @@ const rateLimiter = rateLimit({
 });
 
 // ==========================================================
-// 🌐 متغيرات البيئة ومفتاح ScraperAPI
+// 🌐 متغيرات البيئة ومفتاح ScrapingAPI
 // ==========================================================
-const SUPABASE_URL = process.env.SUPABASE_URL || "https://qfcsaiyuyxhibidrrmha.supabase.co";
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
-const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY || "81642fe717b80c9fd3093d74795f65f5";
+const SCRAPING_API_KEY = process.env.SCRAPING_API_KEY || process.env.SCRAPINGBEE_API_KEY || "";
 
 // إنشاء مثيلات
 const cache = new MemoryCache();
 
 console.log('🚀 جاري تشغيل الخادم...');
-console.log(`🔑 ScraperAPI Key: ${SCRAPER_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
+console.log(`🐝 ScrapingAPI Key: ${SCRAPING_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
 
 // ==========================================================
 // 🚀 Middleware
@@ -175,12 +173,38 @@ function extractNamesAlternative(html) {
   return [...new Set(names)].slice(0, 200);
 }
 
-function detectProvider(cleanPhone) {
-  if (/^(77|78)[0-9]{7}$/.test(cleanPhone)) return 'يمن موبايل';
-  if (/^(73)[0-9]{7}$/.test(cleanPhone)) return 'YOU';
-  if (/^(71)[0-9]{7}$/.test(cleanPhone)) return 'سبأفون';
-  if (/^(70)[0-9]{7}$/.test(cleanPhone)) return 'واي';
-  return 'رقم دولي';
+// ==========================================================
+// 🌍 تحديد مزود الخدمة والدولة (شامل الدول العربية)
+// ==========================================================
+function detectProvider(fullNumber) {
+  // الأرقام المحلية اليمنية
+  if (/^(77|78)[0-9]{7}$/.test(fullNumber)) return 'يمن موبايل (اليمن)';
+  if (/^(73)[0-9]{7}$/.test(fullNumber)) return 'YOU (اليمن)';
+  if (/^(71)[0-9]{7}$/.test(fullNumber)) return 'سبأفون (اليمن)';
+  if (/^(70)[0-9]{7}$/.test(fullNumber)) return 'واي (اليمن)';
+
+  // الدول العربية عبر مفتاح الدول (International Country Codes)
+  if (fullNumber.startsWith('967')) return 'السجلات اليمنية (دولي)';
+  if (fullNumber.startsWith('966')) return 'المملكة العربية السعودية';
+  if (fullNumber.startsWith('20')) return 'جمهورية مصر العربية';
+  if (fullNumber.startsWith('971')) return 'الإمارات العربية المتحدة';
+  if (fullNumber.startsWith('962')) return 'المملكة الأردنية الهاشمية';
+  if (fullNumber.startsWith('964')) return 'جمهورية العراق';
+  if (fullNumber.startsWith('963')) return 'الجمهورية العربية السورية';
+  if (fullNumber.startsWith('961')) return 'الجمهورية اللبنانية';
+  if (fullNumber.startsWith('965')) return 'دولة الكويت';
+  if (fullNumber.startsWith('974')) return 'دولة قطر';
+  if (fullNumber.startsWith('973')) return 'مملكة البحرين';
+  if (fullNumber.startsWith('968')) return 'سلطنة عمان';
+  if (fullNumber.startsWith('970') || fullNumber.startsWith('972')) return 'دولة فلسطين';
+  if (fullNumber.startsWith('249')) return 'جمهورية السودان';
+  if (fullNumber.startsWith('212')) return 'المملكة المغربية';
+  if (fullNumber.startsWith('216')) return 'الجمهورية التونسية';
+  if (fullNumber.startsWith('213')) return 'الجمهورية الجزائرية';
+  if (fullNumber.startsWith('218')) return 'دولة ليبيا';
+  if (fullNumber.startsWith('966')) return 'المملكة العربية السعودية';
+
+  return 'رقم عربي / دولي آخر';
 }
 
 // ==========================================================
@@ -206,18 +230,24 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
     let cleanPhone = query.trim().replace(/\s+/g, '').replace(/[-()]/g, '');
     if (cleanPhone.startsWith('00')) cleanPhone = cleanPhone.substring(2);
-    else if (cleanPhone.startsWith('0')) cleanPhone = cleanPhone.substring(1);
     else if (cleanPhone.startsWith('+')) cleanPhone = cleanPhone.substring(1);
-    
-    if (cleanPhone.startsWith('967')) cleanPhone = cleanPhone.substring(3);
 
-    const provider = detectProvider(cleanPhone);
+    // إذا كان رقم محلي يمني يبدأ بـ 0 بدون مفتاح دولة
     let databasePhone = cleanPhone;
-    if (provider !== 'رقم دولي' && !databasePhone.startsWith('0')) {
-      databasePhone = '0' + databasePhone;
+    if (/^0[7-8][0-9]{8}$/.test(cleanPhone)) {
+      databasePhone = cleanPhone.substring(1); // إزالة الصفر المحلي للاستعلام
     }
 
-    const scrapePhone = provider !== 'رقم دولي' ? '+967' + cleanPhone : '+' + cleanPhone;
+    const provider = detectProvider(cleanPhone);
+    
+    // تجهيز الرقم لإرساله لعملية البحث
+    let scrapePhone = cleanPhone;
+    if (!cleanPhone.startsWith('967') && !cleanPhone.startsWith('966') && !cleanPhone.startsWith('20') && 
+        !cleanPhone.startsWith('971') && !cleanPhone.startsWith('962') && !cleanPhone.startsWith('964') &&
+         /^[7-8][0-9]{8}$/.test(cleanPhone)) {
+      scrapePhone = '967' + cleanPhone; // افتراضي محلي يمني إذا لم يكن به مفتاح دولة
+    }
+    scrapePhone = '+' + scrapePhone;
 
     // ==========================================================
     // 🛡️ [المستوى 1] الكاش المحلي
@@ -232,62 +262,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🛡️ [المستوى 2] قراءة من Supabase
-    // ==========================================================
-    if (SUPABASE_ANON_KEY) {
-      try {
-        console.log(`🔎 البحث في Supabase عن: ${databasePhone}`);
-        
-        const dbResponse = await fetch(
-          `${SUPABASE_URL}/rest/v1/numbers?phone=eq.${databasePhone}&select=*`,
-          {
-            headers: {
-              'apikey': SUPABASE_ANON_KEY,
-              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-            }
-          }
-        );
-
-        if (dbResponse.ok) {
-          const existingRecords = await dbResponse.json();
-          if (existingRecords && existingRecords.length > 0) {
-            console.log(`✅ تم العثور على الرقم في Supabase!`);
-            
-            const results = existingRecords.map((rec) => {
-              const name = rec.name || rec.contact_name || rec.full_name || rec.username || 'اسم غير معروف';
-              const phone = rec.phone || rec.phone_number || databasePhone;
-              const src = rec.source || rec.data_source || 'قاعدة البيانات';
-              const prov = rec.provider || rec.telecom || provider;
-              const date = rec.created_at || rec.added_at || new Date().toISOString();
-
-              return {
-                name: name,
-                phone: phone,
-                source: src,
-                provider: prov,
-                formattedDate: new Date(date).toLocaleDateString('ar-EG')
-              };
-            });
-
-            const finalResponseData = {
-              success: true,
-              results,
-              total: results.length,
-              source: 'supabase_cache',
-              cached_at: new Date().toISOString()
-            };
-
-            await cache.put(cacheKey, finalResponseData);
-            return res.status(200).json(finalResponseData);
-          }
-        }
-      } catch (dbErr) {
-        console.error('❌ خطأ في Supabase:', dbErr);
-      }
-    }
-
-    // ==========================================================
-    // 🌐 [المستوى 3] المحاولة الأولى: جلب مباشر لتوفير النقاط
+    // 🌐 [المستوى 2] المحاولة الأولى: جلب مباشر
     // ==========================================================
     let names = [];
     let success = false;
@@ -346,21 +321,23 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🐝 [المستوى 4] ScraperAPI (خيار بديل عند فشل المباشر)
+    // 🐝 [المستوى 3] استخدام ScrapingAPI (عند فشل الجلب المباشر)
     // ==========================================================
-    if ((!success || names.length === 0) && SCRAPER_API_KEY) {
-      console.log('🐝 الجلب المباشر لم ينجح، استخدام ScraperAPI...');
+    if ((!success || names.length === 0) && SCRAPING_API_KEY) {
+      console.log('🐝 الجلب المباشر لم ينجح، استخدام ScrapingAPI...');
       
       try {
         const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
         
-        const scraperApiUrl = new URL('https://api.scraperapi.com/');
-        scraperApiUrl.searchParams.append('api_key', SCRAPER_API_KEY);
-        scraperApiUrl.searchParams.append('url', targetUrl);
-        scraperApiUrl.searchParams.append('render', 'false'); // لتوفير الرصيد
+        const scrapingApiUrl = new URL('https://api.scrapingapi.com/v1/');
+        scrapingApiUrl.searchParams.append('api_key', SCRAPING_API_KEY);
+        scrapingApiUrl.searchParams.append('url', targetUrl);
+        scrapingApiUrl.searchParams.append('render_js', 'false');
+        scrapingApiUrl.searchParams.append('premium_proxy', 'false');
 
-        const response = await fetch(scraperApiUrl.toString(), {
-          method: 'GET'
+        const response = await fetch(scrapingApiUrl.toString(), {
+          method: 'GET',
+          headers: browserHeaders
         });
         
         if (response.ok) {
@@ -372,7 +349,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
             if (extractedNames.length > 0) {
               names = extractedNames;
               success = true;
-              source = 'scraperapi_json';
+              source = 'scrapingapi_json';
             }
           } catch (e) {}
 
@@ -382,22 +359,22 @@ app.all('/api/search', rateLimiter, async (req, res) => {
               if (extractedNames.length > 0) {
                 names = extractedNames;
                 success = true;
-                source = 'scraperapi_html';
+                source = 'scrapingapi_html';
               } else {
                 const alternativeNames = extractNamesAlternative(responseContent);
                 if (alternativeNames.length > 0) {
                   names = alternativeNames;
                   success = true;
-                  source = 'scraperapi_alternative';
+                  source = 'scrapingapi_alternative';
                 }
               }
             }
           }
         } else {
-          lastError = `ScraperAPI error: ${response.status}`;
+          lastError = `ScrapingAPI error: ${response.status}`;
         }
       } catch (e) {
-        lastError = `ScraperAPI exception: ${e.message}`;
+        lastError = `ScrapingAPI exception: ${e.message}`;
       }
     }
 
@@ -417,7 +394,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const results = names.map(name => ({
       name: name,
       phone: databasePhone,
-      source: source.includes('scraperapi') ? 'ScraperAPI' : 'مباشر',
+      source: source.includes('scrapingapi') ? 'ScrapingAPI' : 'مباشر',
       provider: provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
