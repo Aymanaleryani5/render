@@ -59,7 +59,7 @@ const rateLimiter = rateLimit({
 // ==========================================================
 // 🌐 متغيرات البيئة ومفتاح ScrapingAPI
 // ==========================================================
-const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "81642fe717b80c9fd3093d74795f65f5";
+const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "654649b0128a453b96288f7685c28f4f";
 
 // إنشاء مثيلات
 const cache = new MemoryCache();
