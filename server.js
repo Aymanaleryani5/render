@@ -7,7 +7,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ==========================================================
-// 📊 نظام الكاش (في الذاكرة)
+// 📊 نظام الكاش (في الذاكرة - أسرع)
 // ==========================================================
 const cache = new Map();
 
@@ -61,7 +61,7 @@ app.use(cors({
 app.use(express.json());
 
 // ==========================================================
-// 📝 دوال استخراج وتنظيف الأسماء (محسنة)
+// 📝 دوال استخراج وتنظيف الأسماء (مدمجة من الكودين)
 // ==========================================================
 
 const STOP_WORDS = [
@@ -92,60 +92,57 @@ function cleanExtractedName(name) {
     .trim();
 }
 
-function extractNamesFromJSON(jsonData) {
-  const names = [];
-  try {
-    let text = '';
-    if (typeof jsonData === 'string') {
-      text = jsonData;
-    } else if (jsonData.result) {
-      text = typeof jsonData.result === 'string' ? jsonData.result : JSON.stringify(jsonData.result);
-    } else {
-      text = JSON.stringify(jsonData);
-    }
-    
-    if (text) {
-      // محاولة استخراج اسم الشهرة
-      const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/i);
-      if (fameMatch) {
-        let name = cleanExtractedName(fameMatch[1]);
-        if (isRealName(name) && !names.includes(name)) names.push(name);
-      }
-      
-      // محاولة استخراج من الأرقام المرقمة
-      const numberedMatches = text.match(/\d+\s*[-–—]\s*([^\d\n]+)/g);
-      if (numberedMatches) {
-        numberedMatches.forEach(m => {
-          const nameMatch = m.match(/\d+\s*[-–—]\s*([^\d\n]+)/);
-          if (nameMatch) {
-            let name = cleanExtractedName(nameMatch[1]);
-            if (isRealName(name) && !names.includes(name)) names.push(name);
-          }
-        });
-      }
-      
-      // محاولة استخراج من صيغة name: value
-      const nameValueMatches = text.match(/name[:\s]+([^\n,]+)/gi);
-      if (nameValueMatches) {
-        nameValueMatches.forEach(m => {
-          const nameMatch = m.match(/name[:\s]+([^\n,]+)/i);
-          if (nameMatch) {
-            let name = cleanExtractedName(nameMatch[1]);
-            if (isRealName(name) && !names.includes(name)) names.push(name);
-          }
-        });
-      }
-    }
-  } catch (e) {
-    console.error('خطأ في استخراج الأسماء من JSON:', e);
-  }
-  return [...new Set(names)].slice(0, 200);
-}
-
-function extractNamesFromResponse(html) {
+// ==========================================================
+// 🔥 دالة استخراج محسنة (تجمع كل الطرق)
+// ==========================================================
+function extractAllNames(text) {
   const names = [];
   
-  // نمط الأرقام المرقمة
+  if (!text || text.length < 10) return names;
+  
+  // 1️⃣ استخراج من JSON
+  try {
+    const jsonData = JSON.parse(text);
+    const jsonText = jsonData.result || JSON.stringify(jsonData);
+    
+    // اسم الشهرة (من الكود القديم)
+    const fameMatch = jsonText.match(/اسم الشهرة[:\s]+([^\n]+)/);
+    if (fameMatch) {
+      let name = cleanExtractedName(fameMatch[1]);
+      if (isRealName(name) && !names.includes(name)) names.push(name);
+    }
+    
+    // الأرقام المرقمة
+    const numberedMatches = jsonText.match(/\d+\s*[-–—]\s*([^\d\n]+)/g);
+    if (numberedMatches) {
+      numberedMatches.forEach(m => {
+        const nameMatch = m.match(/\d+\s*[-–—]\s*([^\d\n]+)/);
+        if (nameMatch) {
+          let name = cleanExtractedName(nameMatch[1]);
+          if (isRealName(name) && !names.includes(name)) names.push(name);
+        }
+      });
+    }
+    
+    // name: value (من الكود الجديد)
+    const nameValueMatches = jsonText.match(/name[:\s]+([^\n,]+)/gi);
+    if (nameValueMatches) {
+      nameValueMatches.forEach(m => {
+        const nameMatch = m.match(/name[:\s]+([^\n,]+)/i);
+        if (nameMatch) {
+          let name = cleanExtractedName(nameMatch[1]);
+          if (isRealName(name) && !names.includes(name)) names.push(name);
+        }
+      });
+    }
+  } catch (e) {
+    // ليس JSON، نكمل مع HTML
+  }
+  
+  // 2️⃣ استخراج من HTML
+  const html = typeof text === 'string' ? text : JSON.stringify(text);
+  
+  // الأرقام المرقمة
   const numberedPattern = /(\d+)\s*[-–—]\s*([^\d\n<]+)/g;
   let match;
   while ((match = numberedPattern.exec(html)) !== null) {
@@ -153,7 +150,7 @@ function extractNamesFromResponse(html) {
     if (isRealName(name) && !names.includes(name)) names.push(name);
   }
   
-  // نمط العلامات
+  // علامات name
   const nameTags = /<[^>]*name[^>]*>([^<]+)<\/[^>]*>/gi;
   let tagMatch;
   while ((tagMatch = nameTags.exec(html)) !== null) {
@@ -161,33 +158,20 @@ function extractNamesFromResponse(html) {
     if (isRealName(name) && !names.includes(name)) names.push(name);
   }
   
-  // البحث عن اسم في النص العادي
-  const textContent = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
-  const namePattern = /(?:اسم|الاسم|name)\s*[:]\s*([^\n,]+)/gi;
-  let nameMatch;
-  while ((nameMatch = namePattern.exec(textContent)) !== null) {
-    let name = cleanExtractedName(nameMatch[1]);
-    if (isRealName(name) && !names.includes(name)) names.push(name);
-  }
-  
-  return [...new Set(names)].slice(0, 200);
-}
-
-function extractNamesAlternative(html) {
-  const names = [];
+  // 3️⃣ استخراج بديل (من الكود القديم)
   const textContent = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
   
   const keywords = ['اسم', 'الاسم', 'name', 'user', 'contact', 'صاحب', 'مالك', 'الشهرة', 'المستخدم', 'العميل', 'owner', 'fullname'];
   for (const keyword of keywords) {
     const regex = new RegExp(`${keyword}[\\s:]*([^\\n<,]+)`, 'gi');
-    let match;
-    while ((match = regex.exec(textContent)) !== null) {
-      let name = cleanExtractedName(match[1]);
+    let kwMatch;
+    while ((kwMatch = regex.exec(textContent)) !== null) {
+      let name = cleanExtractedName(kwMatch[1]);
       if (isRealName(name) && !names.includes(name)) names.push(name);
     }
   }
   
-  // محاولة استخراج أي كلمات عربية تبدو كأسماء
+  // 4️⃣ استخراج كلمات عربية (من الكود الجديد)
   const arabicWords = textContent.match(/[\u0600-\u06FF]{3,}/g);
   if (arabicWords) {
     arabicWords.forEach(word => {
@@ -196,6 +180,13 @@ function extractNamesAlternative(html) {
         if (isRealName(name) && !names.includes(name)) names.push(name);
       }
     });
+  }
+  
+  // 5️⃣ استخراج من اسم الشهرة في النص العادي (من الكود القديم)
+  const fameTextMatch = textContent.match(/اسم الشهرة[:\s]+([^\n]+)/i);
+  if (fameTextMatch) {
+    let name = cleanExtractedName(fameTextMatch[1]);
+    if (isRealName(name) && !names.includes(name)) names.push(name);
   }
   
   return [...new Set(names)].slice(0, 200);
@@ -210,7 +201,7 @@ function detectProvider(cleanPhone) {
 }
 
 // ==========================================================
-// 🚀 دالة الجلب مع مهلة زمنية وإعادة المحاولة
+// 🚀 دالة الجلب مع مهلة زمنية
 // ==========================================================
 async function fetchWithTimeout(url, options = {}, timeout = 8000, retries = 2) {
   let lastError;
@@ -231,7 +222,6 @@ async function fetchWithTimeout(url, options = {}, timeout = 8000, retries = 2) 
         return response;
       }
       
-      // إذا كان الرد 429 (Too Many Requests)، انتظر ثم حاول مرة أخرى
       if (response.status === 429) {
         console.log(`⚠️ تم رفض الطلب (429)، انتظار 2 ثانية والمحاولة مرة أخرى (محاولة ${attempt}/${retries})`);
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -252,7 +242,7 @@ async function fetchWithTimeout(url, options = {}, timeout = 8000, retries = 2) 
 }
 
 // ==========================================================
-// 🚀 Endpoint الرئيسي (محسن)
+// 🚀 Endpoint الرئيسي (محسن وسريع مع استخراج أفضل)
 // ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
@@ -306,7 +296,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const base64Phone = Buffer.from(scrapePhone).toString('base64');
     const timestamp = Date.now();
 
-    // مجموعة من الـ User-Agents لتجنب الحظر
     const userAgents = [
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36',
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -331,7 +320,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       'user-agent': randomUA
     };
 
-    // روابط متعددة للمحاولة
     const urls = [
       `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`,
       `https://b.raw2fid.net/calle/?res_id=K${base64Phone}%3D%3D`,
@@ -339,12 +327,12 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     ];
 
     // ==========================================================
-    // 🚀 تشغيل المصادر بالتوازي مع إعادة المحاولة
+    // 🚀 تشغيل المصادر بالتوازي
     // ==========================================================
     let names = [];
     let source = '';
 
-    // دالة الجلب المباشر مع محاولة روابط متعددة
+    // دالة الجلب المباشر
     async function tryDirectFetch() {
       for (const url of urls) {
         try {
@@ -358,32 +346,12 @@ app.all('/api/search', rateLimiter, async (req, res) => {
             const text = await response.text();
             console.log(`📄 تم استلام رد بطول ${text.length} حرف`);
             
-            let extracted = [];
-
-            // محاولة parse كـ JSON
-            try {
-              const json = JSON.parse(text);
-              extracted = extractNamesFromJSON(json);
-              if (extracted.length > 0) {
-                console.log(`✅ استخرج ${extracted.length} اسم من JSON`);
-                return { names: extracted, source: 'direct_json' };
-              }
-            } catch (e) {
-              console.log('⚠️ ليس JSON صحيح، محاولة استخراج من HTML');
-            }
-
-            // محاولة استخراج من HTML
-            extracted = extractNamesFromResponse(text);
+            // استخدام دالة الاستخراج المحسنة
+            const extracted = extractAllNames(text);
+            
             if (extracted.length > 0) {
-              console.log(`✅ استخرج ${extracted.length} اسم من HTML`);
-              return { names: extracted, source: 'direct_html' };
-            }
-
-            // محاولة استخراج بديل
-            extracted = extractNamesAlternative(text);
-            if (extracted.length > 0) {
-              console.log(`✅ استخرج ${extracted.length} اسم من النص البديل`);
-              return { names: extracted, source: 'direct_alternative' };
+              console.log(`✅ استخرج ${extracted.length} اسم من المصدر المباشر`);
+              return { names: extracted, source: 'direct' };
             }
           }
         } catch (error) {
@@ -393,7 +361,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       return null;
     }
 
-    // دالة ScrapingAPI مع روابط متعددة
+    // دالة ScrapingAPI
     async function tryScrapingAPI() {
       if (!SCRAPINGAPI_API_KEY) return null;
 
@@ -414,27 +382,13 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
           if (response && response.ok) {
             const text = await response.text();
-            let extracted = [];
-
-            try {
-              const json = JSON.parse(text);
-              extracted = extractNamesFromJSON(json);
-              if (extracted.length > 0) {
-                console.log(`✅ استخرج ${extracted.length} اسم من ScrapingAPI JSON`);
-                return { names: extracted, source: 'scrapingapi_json' };
-              }
-            } catch (e) {}
-
-            extracted = extractNamesFromResponse(text);
+            
+            // استخدام دالة الاستخراج المحسنة
+            const extracted = extractAllNames(text);
+            
             if (extracted.length > 0) {
-              console.log(`✅ استخرج ${extracted.length} اسم من ScrapingAPI HTML`);
-              return { names: extracted, source: 'scrapingapi_html' };
-            }
-
-            extracted = extractNamesAlternative(text);
-            if (extracted.length > 0) {
-              console.log(`✅ استخرج ${extracted.length} اسم من ScrapingAPI بديل`);
-              return { names: extracted, source: 'scrapingapi_alternative' };
+              console.log(`✅ استخرج ${extracted.length} اسم من ScrapingAPI`);
+              return { names: extracted, source: 'scrapingapi' };
             }
           }
         } catch (error) {
@@ -446,7 +400,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
     // 🔥 تشغيل المصادر معاً
     console.log(`🔍 البحث عن: ${scrapePhone}`);
-    console.log(`📡 عدد الروابط للمحاولة: ${urls.length}`);
     
     const [directResult, scrapingResult] = await Promise.allSettled([
       tryDirectFetch(),
@@ -457,11 +410,11 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     if (directResult.status === 'fulfilled' && directResult.value) {
       names = directResult.value.names;
       source = directResult.value.source;
-      console.log(`✅ تم الحصول على ${names.length} اسم من المصدر المباشر (${source})`);
+      console.log(`✅ تم الحصول على ${names.length} اسم من المصدر المباشر`);
     } else if (scrapingResult.status === 'fulfilled' && scrapingResult.value) {
       names = scrapingResult.value.names;
       source = scrapingResult.value.source;
-      console.log(`✅ تم الحصول على ${names.length} اسم من ScrapingAPI (${source})`);
+      console.log(`✅ تم الحصول على ${names.length} اسم من ScrapingAPI`);
     }
 
     // ==========================================================
@@ -470,18 +423,11 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     if (names.length === 0) {
       console.log(`❌ لم يتم العثور على نتائج للرقم: ${scrapePhone}`);
       
-      // إذا كان الرقم يمني، حاول البحث بدون 967
-      if (provider !== 'رقم دولي' && cleanPhone.length >= 9) {
-        console.log('🔄 محاولة البحث بصيغة مختلفة...');
-        // يمكن إضافة منطق إضافي هنا
-      }
-      
       return res.status(200).json({
         success: false,
         results: [],
         total: 0,
-        error: 'لم يتم العثور على نتائج',
-        message: '⚠️ قد يكون الرقم غير مسجل أو الموقع لا يستجيب'
+        error: 'لم يتم العثور على نتائج'
       });
     }
 
@@ -534,4 +480,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`⏱️ مهلة الطلب: 6-8 ثواني`);
   console.log(`🔄 عدد محاولات إعادة الطلب: 2`);
   console.log(`📡 عدد الروابط للمحاولة: 3`);
+  console.log(`✨ تم دمج جميع طرق الاستخراج للحصول على أقصى نتائج`);
 });
