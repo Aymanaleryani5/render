@@ -13,7 +13,7 @@ const PORT = process.env.PORT || 3000;
 
 class MemoryCache {
   constructor() {
-    this.cache = new NodeCache({ stdTTL: 1, checkperiod: 1 });
+    this.cache = new NodeCache({ stdTTL: 2592000, checkperiod: 86400 });
   }
 
   async match(requestKey) {
