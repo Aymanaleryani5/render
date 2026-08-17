@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const NodeCache = require('node-cache');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
@@ -8,43 +7,29 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ==========================================================
-// 📊 نظام الكاش المحلي (In-Memory Cache) - سريع جداً
+// 📊 نظام الكاش (في الذاكرة)
 // ==========================================================
+const cache = new Map();
 
-class MemoryCache {
-  constructor() {
-    // تخزين لمدة 30 يوم، فحص كل 24 ساعة
-    this.cache = new NodeCache({ stdTTL: 2592000, checkperiod: 86400 });
-  }
-
-  async match(requestKey) {
-    const entry = this.cache.get(requestKey);
-    if (!entry) return null;
-    return entry;
-  }
-
-  async put(requestKey, responseData) {
-    this.cache.set(requestKey, responseData);
-  }
-
-  async clear() {
-    this.cache.flushAll();
-  }
+// وظيفة لحذف الكاش بعد فترة
+function setCache(key, data, ttl = 3600000) { // ساعة واحدة افتراضياً
+  cache.set(key, data);
+  setTimeout(() => cache.delete(key), ttl);
 }
 
 // ==========================================================
-// 📊 نظام تحديد المعدل (Rate Limiting) - للحد من الطلبات المتكررة
+// 📊 نظام تحديد المعدل (Rate Limiting)
 // ==========================================================
 const rateLimiter = rateLimit({
-  windowMs: 2 * 1000, // 2 ثانية
-  max: 2, // طلبين كل 2 ثانية (أسرع)
-  message: JSON.stringify({
+  windowMs: 2000, // 2 ثواني
+  max: 3, // 3 طلبات لكل IP
+  message: {
     success: false,
     results: [],
     total: 0,
     error: 'مهلاً! الرجاء الانتظار',
-    message: '⏳ يرجى الانتظار 2 ثانية بين عمليات البحث'
-  }),
+    message: '⏳ يرجى الانتظار 2 ثواني بين عمليات البحث'
+  },
   keyGenerator: (req) => {
     return req.headers['cf-connecting-ip'] || 
            req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
@@ -58,16 +43,16 @@ const rateLimiter = rateLimit({
 });
 
 // ==========================================================
-// 🌐 متغيرات البيئة ومفتاح ScrapingAPI
+// 🌐 متغيرات البيئة
 // ==========================================================
-const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "654649b0128a453b96288f7685c28f4f";
-
-const cache = new MemoryCache();
+const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "";
 
 console.log('🚀 جاري تشغيل الخادم...');
-console.log(`🐝 ScraperAPI Key: ${SCRAPINGAPI_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
-console.log('⚡ وضع السرعة: مفعل (كاش محلي + استجابة سريعة)');
+console.log(`🐝 ScrapingAPI API Key: ${SCRAPINGAPI_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
 
+// ==========================================================
+// 🚀 Middleware
+// ==========================================================
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -77,109 +62,100 @@ app.use(cors({
 app.use(express.json());
 
 // ==========================================================
-// 📝 دوال استخراج الأسماء (محسنة للسرعة)
+// 📝 دوال استخراج وتنظيف الأسماء
 // ==========================================================
 
-// ✅ قائمة الكلمات الممنوعة
-const FORBIDDEN_NAMES = [
-  'null', 'undefined', 'info', 'country', 'search', 
-  'phone', 'true', 'false', 'error', 'success'
+const STOP_WORDS = [
+  'صحيح', 'صحيحة', 'خطأ', 'نعم', 'لا', 'بحث', 'نتائج', 'البحث', 'للرقم', 
+  'اسم', 'الشهرة', 'السجلات', 'المكتشفة', 'الأكثر', 'شيوعاً', 'اليمن', 
+  'سجل', 'تفاصيل', 'بيانات', 'عفواً', 'تأكيد', 'الرقم', 'يرجى', 'الانتظار',
+  'null', 'undefined', 'info', 'country', 'search', 'phone', 'true', 'false'
 ];
 
-// ✅ دالة سريعة للتحقق من صحة الاسم
 function isRealName(name) {
-  if (!name || name.length < 2) return false;
+  if (!name || name.length < 3) return false;
   if (/^\+?\d+$/.test(name)) return false;
-  
-  const trimmedName = name.trim().toLowerCase();
-  for (const forbidden of FORBIDDEN_NAMES) {
-    if (trimmedName.includes(forbidden)) return false;
-  }
-  
+  if (STOP_WORDS.includes(name.trim())) return false;
   if (!/[\u0600-\u06FFa-zA-Z]/.test(name)) return false;
   return true;
 }
 
-// ✅ تنظيف سريع للاسم
 function cleanExtractedName(name) {
   if (!name) return '';
   return name
     .replace(/نتائج\s*البحث\s*للرقم/gi, '')
     .replace(/\|{2,}\s*split\s*\|{2,}/gi, '')
     .replace(/\{.*?\}/g, '')
-    .replace(/[\\{}[\]"':\-_,\/]/g, ' ')
+    .replace(/[\\{}{}\[\]"':\-_,\/]/g, ' ')
+    .replace(/\b(info|country|n|null|undefined|الرقم|اسم|search|phone|نتائج|البحث|للرقم|الشهرة|السجلات|المكتشفة|الأكثر|شيوعاً|اليمن|من|هذا|هذه|كان|مع|عن|على|الى|حتى|بين|أو|و|ف|في|إلى|على|عن|من|إلى|عند|ب|ك|ل|لل|و|ثم|حتى|لكن|ولا|أو|ثم|حيث|بين|عندما|ذلك|هذه|هذا|التي|الذي|الذين|اللاتي|اللواتي|منذ|خلال|بسبب|دون|بينما|حيثما|كلما|متى|أين|كيف|إذا|لن|لم|ما|لا|ليس|سوف|قد|ربما|لعل|ليت|لابد|لعل|لكي|كي|حتّى|حتى)\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-// ✅ استخراج الأسماء من JSON (مُحسَّن للسرعة)
 function extractNamesFromJSON(jsonData) {
   const names = [];
   try {
-    const text = typeof jsonData === 'string' ? jsonData : JSON.stringify(jsonData);
-    
-    // البحث عن الأنماط بسرعة
-    const patterns = [
-      /اسم الشهرة[:\s]+([^\n"<]+)/,
-      /\d+\s*[-–—]\s*([^\d\n"<]+)/g,
-      /[\u0600-\u06FF]{2,}(?:\s+[\u0600-\u06FF]{2,}){1,4}/g
-    ];
-    
-    // استخراج الأسماء المرقمة
-    const numberedMatches = text.match(patterns[1]);
-    if (numberedMatches) {
-      numberedMatches.forEach(m => {
-        const match = m.match(/\d+\s*[-–—]\s*([^\d\n"<]+)/);
-        if (match) {
-          const name = cleanExtractedName(match[1]);
-          if (isRealName(name)) names.push(name);
-        }
-      });
+    const text = typeof jsonData === 'string' ? jsonData : (jsonData.result || JSON.stringify(jsonData));
+    if (text) {
+      const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
+      if (fameMatch) {
+        let name = cleanExtractedName(fameMatch[1]);
+        if (isRealName(name) && !names.includes(name)) names.push(name);
+      }
+      
+      const numberedMatches = text.match(/\d+\s*[-–—]\s*([^\d\n]+)/g);
+      if (numberedMatches) {
+        numberedMatches.forEach(m => {
+          const nameMatch = m.match(/\d+\s*[-–—]\s*([^\d\n]+)/);
+          if (nameMatch) {
+            let name = cleanExtractedName(nameMatch[1]);
+            if (isRealName(name) && !names.includes(name)) names.push(name);
+          }
+        });
+      }
     }
-    
-    // استخراج الأسماء العربية
-    const arabicMatches = text.match(patterns[2]);
-    if (arabicMatches) {
-      arabicMatches.forEach(name => {
-        const clean = cleanExtractedName(name);
-        if (isRealName(clean)) names.push(clean);
-      });
-    }
-    
   } catch (e) {
-    console.error('خطأ في الاستخراج:', e.message);
+    console.error('خطأ في استخراج الأسماء من JSON:', e);
   }
-  
-  // إزالة التكرارات وترتيب سريع
-  const unique = [...new Set(names)];
-  return unique.sort((a, b) => a.localeCompare(b, 'ar')).slice(0, 300);
+  return [...new Set(names)].slice(0, 200);
 }
 
-// ✅ استخراج الأسماء من HTML (مُحسَّن للسرعة)
 function extractNamesFromResponse(html) {
   const names = [];
-  
-  // استخراج الأسماء المرقمة
   const numberedPattern = /(\d+)\s*[-–—]\s*([^\d\n<]+)/g;
   let match;
   while ((match = numberedPattern.exec(html)) !== null) {
-    const name = cleanExtractedName(match[2]);
-    if (isRealName(name)) names.push(name);
+    let name = cleanExtractedName(match[2]);
+    if (isRealName(name) && !names.includes(name)) names.push(name);
   }
   
-  // استخراج الأسماء العربية
-  const arabicPattern = /[\u0600-\u06FF]{2,}(?:\s+[\u0600-\u06FF]{2,}){1,4}/g;
-  let arabicMatch;
-  while ((arabicMatch = arabicPattern.exec(html)) !== null) {
-    const name = cleanExtractedName(arabicMatch[0]);
-    if (isRealName(name)) names.push(name);
+  const nameTags = /<[^>]*name[^>]*>([^<]+)<\/[^>]*>/gi;
+  let tagMatch;
+  while ((tagMatch = nameTags.exec(html)) !== null) {
+    let name = cleanExtractedName(tagMatch[1]);
+    if (isRealName(name) && !names.includes(name)) names.push(name);
   }
   
-  const unique = [...new Set(names)];
-  return unique.sort((a, b) => a.localeCompare(b, 'ar')).slice(0, 300);
+  return [...new Set(names)].slice(0, 200);
 }
 
-// ✅ كشف مقدم الخدمة
+function extractNamesAlternative(html) {
+  const names = [];
+  const textContent = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+  
+  const keywords = ['اسم', 'الاسم', 'name', 'user', 'contact', 'صاحب', 'مالك', 'الشهرة', 'المستخدم', 'العميل'];
+  for (const keyword of keywords) {
+    const regex = new RegExp(`${keyword}[\\s:]*([^\\n<,]+)`, 'gi');
+    let match;
+    while ((match = regex.exec(textContent)) !== null) {
+      let name = cleanExtractedName(match[1]);
+      if (isRealName(name) && !names.includes(name)) names.push(name);
+    }
+  }
+  
+  return [...new Set(names)].slice(0, 200);
+}
+
 function detectProvider(cleanPhone) {
   if (/^(77|78)[0-9]{7}$/.test(cleanPhone)) return 'يمن موبايل';
   if (/^(73)[0-9]{7}$/.test(cleanPhone)) return 'YOU';
@@ -189,223 +165,249 @@ function detectProvider(cleanPhone) {
 }
 
 // ==========================================================
-// 🚀 Endpoint الرئيسي (مُحسَّن للسرعة)
+// 🚀 دالة الجلب مع مهلة زمنية
 // ==========================================================
-app.all('/api/search', rateLimiter, async (req, res) => {
-  const startTime = Date.now();
+async function fetchWithTimeout(url, options = {}, timeout = 8000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
   
   try {
-    let query = req.method === 'GET' ? req.query.query : req.body.query;
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    throw error;
+  }
+}
+
+// ==========================================================
+// 🚀 Endpoint الرئيسي
+// ==========================================================
+app.all('/api/search', rateLimiter, async (req, res) => {
+  try {
+    let query = null;
+    if (req.method === 'GET') {
+      query = req.query.query;
+    } else if (req.method === 'POST') {
+      query = req.body.query;
+    }
 
     if (!query) {
-      return res.status(200).json({ 
-        success: false, 
-        results: [], 
-        total: 0, 
-        error: 'البحث فارغ',
-        responseTime: `${Date.now() - startTime}ms`
+      return res.status(200).json({
+        success: false,
+        results: [],
+        total: 0,
+        error: 'البحث فارغ'
       });
     }
 
-    // تنظيف الرقم بسرعة
     let cleanPhone = query.trim().replace(/\s+/g, '').replace(/[-()]/g, '');
     if (cleanPhone.startsWith('00')) cleanPhone = cleanPhone.substring(2);
     else if (cleanPhone.startsWith('0')) cleanPhone = cleanPhone.substring(1);
     else if (cleanPhone.startsWith('+')) cleanPhone = cleanPhone.substring(1);
+    
     if (cleanPhone.startsWith('967')) cleanPhone = cleanPhone.substring(3);
 
     const provider = detectProvider(cleanPhone);
-    let databasePhone = provider !== 'رقم دولي' && !cleanPhone.startsWith('0') ? '0' + cleanPhone : cleanPhone;
-    const scrapePhone = provider !== 'رقم دولي' ? '+967' + cleanPhone : '+' + cleanPhone;
-
-    // 🔍 التحقق من الكاش المحلي (سريع جداً)
-    const cacheKey = `phone_${databasePhone}`;
-    const cachedData = await cache.match(cacheKey);
-    
-    if (cachedData) {
-      const responseTime = Date.now() - startTime;
-      console.log(`✅ كاش: ${databasePhone} (${responseTime}ms)`);
-      return res.status(200)
-        .set('X-Cache-Status', 'HIT')
-        .set('X-Response-Time', `${responseTime}ms`)
-        .json({
-          ...cachedData,
-          cached: true,
-          responseTime: `${responseTime}ms`
-        });
+    let databasePhone = cleanPhone;
+    if (provider !== 'رقم دولي' && !databasePhone.startsWith('0')) {
+      databasePhone = '0' + databasePhone;
     }
 
-    // 🌐 البحث عبر ScraperAPI (مع مهلة قصيرة)
-    let names = [];
-    let success = false;
-    let source = '';
-    const timestamp = Date.now();
+    const scrapePhone = provider !== 'رقم دولي' ? '+967' + cleanPhone : '+' + cleanPhone;
 
+    // ==========================================================
+    // 🛡️ التحقق من الكاش
+    // ==========================================================
+    const cacheKey = `phone_${databasePhone}`;
+    if (cache.has(cacheKey)) {
+      const cachedData = cache.get(cacheKey);
+      return res.status(200)
+        .set('X-Cache-Status', 'HIT')
+        .set('X-Cache-Level', 'MEMORY_CACHE')
+        .json(cachedData);
+    }
+
+    // ==========================================================
+    // 🌐 تجهيز الطلب
+    // ==========================================================
     const base64Phone = Buffer.from(scrapePhone).toString('base64');
     const dynamicReferer = `https://b.raw2fid.net/calle/?res_id=K${base64Phone}%3D%3D`;
+    const timestamp = Date.now();
 
     const browserHeaders = {
       'accept': '*/*',
       'accept-language': 'en-US,en;q=0.9,ar;q=0.8',
+      'cache-control': 'no-cache',
+      'pragma': 'no-cache',
       'referer': dynamicReferer,
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      'sec-ch-ua': '"Not=A?Brand";v="99", "Google Chrome";v="151", "Chromium";v="151"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'
     };
 
-    // محاولة ScraperAPI مع مهلة 10 ثواني
-    if (SCRAPINGAPI_API_KEY) {
+    const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
+
+    // ==========================================================
+    // 🚀 تشغيل المصدرين بالتوازي (سريع جداً)
+    // ==========================================================
+    let names = [];
+    let source = '';
+
+    // دالة الجلب المباشر
+    async function tryDirectFetch() {
       try {
-        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
-        
-        const scrapingApiUrl = new URL('https://api.scraperapi.com/');
-        scrapingApiUrl.searchParams.append('api_key', SCRAPINGAPI_API_KEY);
-        scrapingApiUrl.searchParams.append('url', targetUrl);
-        scrapingApiUrl.searchParams.append('render', 'false');
-        scrapingApiUrl.searchParams.append('keep_headers', 'true');
-
-        // مهلة 10 ثواني للطلب
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-        const response = await fetch(scrapingApiUrl.toString(), {
+        const response = await fetchWithTimeout(targetUrl, {
           method: 'GET',
-          headers: browserHeaders,
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
+          headers: browserHeaders
+        }, 6000); // مهلة 6 ثواني فقط
 
         if (response.ok) {
-          const content = await response.text();
+          const text = await response.text();
+          let extracted = [];
+
           try {
-            names = extractNamesFromJSON(JSON.parse(content));
-            if (names.length > 0) { success = true; source = 'scrapingapi_json'; }
-          } catch (e) {
-            names = extractNamesFromResponse(content);
-            if (names.length > 0) { success = true; source = 'scrapingapi_html'; }
+            const json = JSON.parse(text);
+            extracted = extractNamesFromJSON(json);
+          } catch {
+            extracted = extractNamesFromResponse(text);
+          }
+
+          if (extracted.length > 0) {
+            return { names: extracted, source: 'direct' };
           }
         }
-      } catch (e) {
-        console.log(`⚠️ ScraperAPI (${databasePhone}):`, e.message);
+        return null;
+      } catch (error) {
+        console.log(`⚠️ فشل الجلب المباشر: ${error.message}`);
+        return null;
       }
     }
 
-    // محاولة مباشرة إذا فشل ScraperAPI
-    if (!success || names.length === 0) {
+    // دالة ScrapingAPI (اختيارية)
+    async function tryScrapingAPI() {
+      if (!SCRAPINGAPI_API_KEY) return null;
+
       try {
-        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
-        
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        const scrapingUrl = new URL('https://api.scraperapi.com/');
+        scrapingUrl.searchParams.append('api_key', SCRAPINGAPI_API_KEY);
+        scrapingUrl.searchParams.append('url', targetUrl);
+        scrapingUrl.searchParams.append('render', 'false');
+        scrapingUrl.searchParams.append('premium_proxy', 'false');
+        scrapingUrl.searchParams.append('forward_headers', 'true');
 
-        const response = await fetch(targetUrl, { 
-          headers: browserHeaders,
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
+        const response = await fetchWithTimeout(scrapingUrl.toString(), {
+          method: 'GET',
+          headers: browserHeaders
+        }, 8000); // مهلة 8 ثواني
 
         if (response.ok) {
-          const content = await response.text();
+          const text = await response.text();
+          let extracted = [];
+
           try {
-            names = extractNamesFromJSON(JSON.parse(content));
-          } catch (e) {
-            names = extractNamesFromResponse(content);
+            const json = JSON.parse(text);
+            extracted = extractNamesFromJSON(json);
+          } catch {
+            extracted = extractNamesFromResponse(text);
+            if (extracted.length === 0) {
+              extracted = extractNamesAlternative(text);
+            }
           }
-          if (names.length > 0) { success = true; source = 'direct_scrape'; }
+
+          if (extracted.length > 0) {
+            return { names: extracted, source: 'scrapingapi' };
+          }
         }
-      } catch (e) {
-        console.log(`⚠️ مباشر (${databasePhone}):`, e.message);
+        return null;
+      } catch (error) {
+        console.log(`⚠️ فشل ScrapingAPI: ${error.message}`);
+        return null;
       }
     }
 
-    // 🚫 لا توجد نتائج
-    if (!success || names.length === 0) {
-      const responseTime = Date.now() - startTime;
-      return res.status(200).json({ 
-        success: false, 
-        results: [], 
-        total: 0, 
-        error: 'لم يتم العثور على نتائج',
-        responseTime: `${responseTime}ms`
+    // 🔥 تشغيل المصدرين معاً
+    console.log(`🔍 البحث عن: ${scrapePhone}`);
+    const [directResult, scrapingResult] = await Promise.allSettled([
+      tryDirectFetch(),
+      tryScrapingAPI()
+    ]);
+
+    // أخذ النتيجة من أيهما أسرع
+    if (directResult.status === 'fulfilled' && directResult.value) {
+      names = directResult.value.names;
+      source = directResult.value.source;
+      console.log(`✅ تم الحصول على ${names.length} اسم من المصدر المباشر`);
+    } else if (scrapingResult.status === 'fulfilled' && scrapingResult.value) {
+      names = scrapingResult.value.names;
+      source = scrapingResult.value.source;
+      console.log(`✅ تم الحصول على ${names.length} اسم من ScrapingAPI`);
+    }
+
+    // ==========================================================
+    // 📊 إذا لم يتم العثور على نتائج
+    // ==========================================================
+    if (names.length === 0) {
+      return res.status(200).json({
+        success: false,
+        results: [],
+        total: 0,
+        error: 'لم يتم العثور على نتائج'
       });
     }
 
-    // ✅ تحضير النتائج
+    // ==========================================================
+    // 📊 تجهيز النتيجة
+    // ==========================================================
     const results = names.map(name => ({
-      name,
+      name: name,
       phone: databasePhone,
-      source: source.includes('scrapingapi') ? 'ScraperAPI' : 'مباشر',
-      provider,
+      source: source.includes('scrapingapi') ? 'ScrapingAPI' : 'مباشر',
+      provider: provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
 
-    const finalResponseData = { 
-      success: true, 
-      results, 
-      total: results.length, 
-      source, 
-      cached_at: new Date().toISOString(),
-      cached: false
+    const finalResponseData = {
+      success: true,
+      results,
+      total: results.length,
+      source: source,
+      cached_at: new Date().toISOString()
     };
 
-    // 💾 حفظ في الكاش للاستخدام المستقبلي
-    await cache.put(cacheKey, finalResponseData);
-
-    const responseTime = Date.now() - startTime;
-    console.log(`✅ جديد: ${databasePhone} (${responseTime}ms) - ${results.length} اسم`);
+    // ==========================================================
+    // 💾 حفظ في الكاش
+    // ==========================================================
+    setCache(cacheKey, finalResponseData);
 
     return res.status(200)
       .set('X-Cache-Status', 'MISS')
-      .set('X-Response-Time', `${responseTime}ms`)
-      .json({
-        ...finalResponseData,
-        responseTime: `${responseTime}ms`
-      });
+      .json(finalResponseData);
 
-  } catch (e) {
-    const responseTime = Date.now() - startTime;
-    console.error(`❌ خطأ (${responseTime}ms):`, e.message);
-    return res.status(500).json({ 
-      success: false, 
-      results: [], 
-      total: 0, 
-      error: e.message,
-      responseTime: `${responseTime}ms`
+  } catch (error) {
+    console.error('❌ خطأ:', error);
+    return res.status(500).json({
+      success: false,
+      results: [],
+      total: 0,
+      error: error.message
     });
   }
-});
-
-// ==========================================================
-// 🧹 مسح الكاش (Endpoint إضافي)
-// ==========================================================
-app.post('/api/cache/clear', async (req, res) => {
-  await cache.clear();
-  res.json({ success: true, message: '🧹 تم مسح الكاش بالكامل' });
-});
-
-// ==========================================================
-// 📊 حالة الكاش (Endpoint إضافي)
-// ==========================================================
-app.get('/api/cache/stats', (req, res) => {
-  const stats = cache.cache.getStats();
-  res.json({
-    success: true,
-    stats: {
-      keys: stats.keys,
-      hits: stats.hits,
-      misses: stats.misses,
-      ksize: stats.ksize,
-      vsize: stats.vsize
-    }
-  });
 });
 
 // ==========================================================
 // 🚀 تشغيل الخادم
 // ==========================================================
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 يعمل الخادم على المنفذ ${PORT}`);
-  console.log(`⚡ وضع السرعة: مفعل`);
-  console.log(`📊 الكاش: جاهز (30 يوم تخزين)`);
-  console.log(`🔄 Rate Limit: طلبين كل 2 ثانية`);
+  console.log(`🚀 تشغيل خادم Node.js على المنفذ ${PORT}`);
+  console.log(`📊 نظام الكاش جاهز (سعة: غير محدودة)`);
+  console.log(`⏱️ مهلة الطلب: 6-8 ثواني`);
 });
