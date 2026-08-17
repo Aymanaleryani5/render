@@ -76,15 +76,43 @@ app.use(express.json());
 // 📝 دوال استخراج الأسماء (مفتوحة لنتائج أكثر دون حذف)
 // ==========================================================
 
-const STOP_WORDS = [
-  'null', 'undefined', 'info', 'country', 'search', 'phone', 'true', 'false', 'error', 'success'
+// ✅ قائمة الأسماء الوصفية الممنوعة (سيتم استبعادها تماماً)
+const FORBIDDEN_NAMES = [
+  'هذا الاسم هو الأكثر شيوعاً',
+  'هذا الاسم هو الأكثر شيوعاً لهذا الرقم',
+  'هذا الاسم هو الأكثر شيوعاً لهذا الرقم .',
+  'الأسماء المرتبطة بالرقم اليمني',
+  'عدد السجلات المكتشفة',
+  'اسم الشهرة',
+  'لهذا الرقم',
+  'نتائج البحث للرقم',
+  'null', 
+  'undefined', 
+  'info', 
+  'country', 
+  'search', 
+  'phone', 
+  'true', 
+  'false', 
+  'error', 
+  'success'
 ];
 
 function isRealName(name) {
   if (!name || name.length < 2) return false;
   if (/^\+?\d+$/.test(name)) return false;
-  if (STOP_WORDS.includes(name.trim().toLowerCase())) return false;
+  
+  // استبعاد الأسماء الممنوعة
+  const trimmedName = name.trim();
+  for (const forbidden of FORBIDDEN_NAMES) {
+    if (trimmedName.toLowerCase().includes(forbidden.toLowerCase())) {
+      return false;
+    }
+  }
+  
+  // استبعاد إذا كان النص كله أرقام أو رموز
   if (!/[\u0600-\u06FFa-zA-Z]/.test(name)) return false;
+  
   return true;
 }
 
@@ -135,7 +163,12 @@ function extractNamesFromJSON(jsonData) {
   } catch (e) {
     console.error('خطأ في استخراج الأسماء من JSON:', e);
   }
-  return [...new Set(names)].slice(0, 300);
+  
+  // ✅ إزالة التكرارات المطابقة تماًما
+  const uniqueNames = [...new Set(names)];
+  
+  // ✅ ترتيب الأسماء أبجدياً
+  return uniqueNames.sort((a, b) => a.localeCompare(b, 'ar')).slice(0, 300);
 }
 
 function extractNamesFromResponse(html) {
@@ -155,7 +188,11 @@ function extractNamesFromResponse(html) {
     if (isRealName(name)) names.push(name);
   }
   
-  return [...new Set(names)].slice(0, 300);
+  // ✅ إزالة التكرارات المطابقة تماًما
+  const uniqueNames = [...new Set(names)];
+  
+  // ✅ ترتيب الأسماء أبجدياً
+  return uniqueNames.sort((a, b) => a.localeCompare(b, 'ar')).slice(0, 300);
 }
 
 function detectProvider(cleanPhone) {
@@ -217,8 +254,8 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         const scrapingApiUrl = new URL('https://api.scraperapi.com/');
         scrapingApiUrl.searchParams.append('api_key', SCRAPINGAPI_API_KEY);
         scrapingApiUrl.searchParams.append('url', targetUrl);
-        scrapingApiUrl.searchParams.append('render', 'false');       // حفظ النقاط المجانية (1 طلب فقط)
-        scrapingApiUrl.searchParams.append('keep_headers', 'true'); // تمرير الهيدرات كمتصفح حقيقي
+        scrapingApiUrl.searchParams.append('render', 'false');
+        scrapingApiUrl.searchParams.append('keep_headers', 'true');
 
         const response = await fetch(scrapingApiUrl.toString(), {
           method: 'GET',
