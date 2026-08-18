@@ -1,4 +1,4 @@
-const express = require('express');
+Const express = require('express');
 const cors = require('cors');
 const NodeCache = require('node-cache');
 const rateLimit = require('express-rate-limit');
@@ -238,7 +238,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     let source = '';
 
     const base64Phone = Buffer.from(scrapePhone).toString('base64');
-    const dynamicReferer = `https://b.raw2fid.net/calle/?res_id=K${base64Phone}%3D%3D`;
+    const dynamicReferer = `https://3.raw2fid.net/calle/?res_id=K${base64Phone}%3D%3D`;
     const timestamp = Date.now();
 
     const browserHeaders = {
@@ -258,7 +258,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
     console.log('🔄 محاولة الجلب المباشر أولاً بدون استخدام ScrapingAPI...');
     try {
-      const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
+      const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
       const response = await fetch(targetUrl, { method: 'GET', headers: browserHeaders });
       
       if (response.ok) {
@@ -295,21 +295,18 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       console.log('🐝 الجلب المباشر لم ينجح، استخدام ScrapingAPI...');
       
       try {
-        const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
+        const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
         
-        // تعديل الخيارات لتجاوز حظر 404
         const scrapingApiUrl = new URL('https://api.scraperapi.com/');
         scrapingApiUrl.searchParams.append('api_key', SCRAPINGAPI_API_KEY);
         scrapingApiUrl.searchParams.append('url', targetUrl);
-        scrapingApiUrl.searchParams.append('keep_headers', 'true'); // السماح بالترويسات الضرورية
-        scrapingApiUrl.searchParams.append('country_code', 'us'); // تعيين البروكسي
+        scrapingApiUrl.searchParams.append('render', 'false');       
+        scrapingApiUrl.searchParams.append('premium_proxy', 'false');   
+        scrapingApiUrl.searchParams.append('forward_headers', 'true');
 
         const response = await fetch(scrapingApiUrl.toString(), {
           method: 'GET',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': dynamicReferer
-          }
+          headers: browserHeaders
         });
         
         if (response.ok) {
@@ -344,7 +341,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
           }
         } else {
           lastError = `ScrapingAPI error: ${response.status}`;
-          console.log(`❌ خطأ ScraperAPI: ${response.status} - ${await response.text()}`);
         }
       } catch (e) {
         lastError = `ScrapingAPI exception: ${e.message}`;
