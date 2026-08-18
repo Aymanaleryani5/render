@@ -51,11 +51,11 @@ const rateLimiter = rateLimit({
 });
 
 // ==========================================================
-// 🌐 التهيئة والتحكم بالطلبات المتزامنة (10 طلبات في وقت واحد)
+// 🌐 التهيئة والتحكم بالطلبات المتزامنة
 // ==========================================================
 const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "654649b0128a453b96288f7685c28f4f";
 const cache = new MemoryCache();
-const limit = pLimit(10); // تحديد الحد الأقصى للطلبات المتزامنة
+const limit = pLimit(10);
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json());
@@ -95,16 +95,16 @@ function parseNames(text) {
   if (!text) return names;
   
   try {
-    const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
+    const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n<]+)/);
     if (fameMatch) {
       let name = cleanExtractedName(fameMatch[1]);
       if (isRealName(name)) names.push(name);
     }
     
-    const numberedMatches = text.match(/\d+\s*[-–—]\s*([^\d\n<]+)/g);
+    const numberedMatches = text.match(/\d+\s*[-–—.]\s*([^\d\n<]+)/g);
     if (numberedMatches) {
       numberedMatches.forEach(m => {
-        const nameMatch = m.match(/\d+\s*[-–—]\s*([^\d\n<]+)/);
+        const nameMatch = m.match(/\d+\s*[-–—.]\s*([^\d\n<]+)/);
         if (nameMatch) {
           let name = cleanExtractedName(nameMatch[1]);
           if (isRealName(name) && !names.includes(name)) names.push(name);
@@ -214,13 +214,17 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       return { names: fetchedNames, source };
     });
 
+    // في حال عدم العثور على أسماء، نرجع معلومات الرقم والمزود مع مصفوفة فارغة
     if (!resultData.names || resultData.names.length === 0) {
-      return res.status(200).json({
+      const emptyResponseData = {
         success: false,
+        phone: databasePhone,
+        provider,
         results: [],
         total: 0,
         error: 'لم يتم العثور على نتائج'
-      });
+      };
+      return res.status(200).json(emptyResponseData);
     }
 
     const results = resultData.names.map(name => ({
@@ -233,6 +237,8 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
     const finalResponseData = {
       success: true,
+      phone: databasePhone,
+      provider,
       results,
       total: results.length,
       source: resultData.source,
