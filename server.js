@@ -297,12 +297,19 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       try {
         const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
         
-        // تشفير كامل للـ targetUrl لتفادي خطأ 404
-        const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false&premium_proxy=false&forward_headers=true`;
+        // تعديل الخيارات لتجاوز حظر 404
+        const scrapingApiUrl = new URL('https://api.scraperapi.com/');
+        scrapingApiUrl.searchParams.append('api_key', SCRAPINGAPI_API_KEY);
+        scrapingApiUrl.searchParams.append('url', targetUrl);
+        scrapingApiUrl.searchParams.append('keep_headers', 'true'); // السماح بالترويسات الضرورية
+        scrapingApiUrl.searchParams.append('country_code', 'us'); // تعيين البروكسي
 
-        const response = await fetch(scrapingApiUrl, {
+        const response = await fetch(scrapingApiUrl.toString(), {
           method: 'GET',
-          headers: browserHeaders
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': dynamicReferer
+          }
         });
         
         if (response.ok) {
@@ -337,6 +344,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
           }
         } else {
           lastError = `ScrapingAPI error: ${response.status}`;
+          console.log(`❌ خطأ ScraperAPI: ${response.status} - ${await response.text()}`);
         }
       } catch (e) {
         lastError = `ScrapingAPI exception: ${e.message}`;
