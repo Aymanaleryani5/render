@@ -10,7 +10,6 @@ const PORT = process.env.PORT || 3000;
 // ==========================================================
 // 📊 نظام الكاش (Memory Cache)
 // ==========================================================
-
 class MemoryCache {
   constructor() {
     this.cache = new NodeCache({ stdTTL: 2592000, checkperiod: 86400 });
@@ -25,18 +24,14 @@ class MemoryCache {
   async put(requestKey, responseData) {
     this.cache.set(requestKey, responseData);
   }
-
-  cleanup() {
-    // NodeCache يقوم بالتنظيف تلقائياً
-  }
 }
 
 // ==========================================================
 // 📊 نظام تحديد المعدل (Rate Limiting)
 // ==========================================================
 const rateLimiter = rateLimit({
-  windowMs: 3 * 1000, // 3 ثواني
-  max: 1, // طلب واحد لكل IP
+  windowMs: 3 * 1000,
+  max: 1,
   message: JSON.stringify({
     success: false,
     results: [],
@@ -61,15 +56,10 @@ const rateLimiter = rateLimit({
 // ==========================================================
 const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY || "0SXVV2GZ5FDJI5FZNPG2KK5L7T2NP1APNA37I18BTMJPIJDRX7RQYTZ81H6O69VMI3L5RV4YQ7E1THAQ";
 
-// إنشاء مثيلات
 const cache = new MemoryCache();
 
-console.log('🚀 جاري تشغيل الخادم...');
-console.log(`🐝 ScrapingBee API Key: ${SCRAPINGBEE_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
+console.log('🚀 جاري تشغيل الخادم بالسعة المحسنة للسرعة والأمان...');
 
-// ==========================================================
-// 🚀 Middleware
-// ==========================================================
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -81,18 +71,17 @@ app.use(express.json());
 // ==========================================================
 // 📝 دوال استخراج وتنظيف الأسماء
 // ==========================================================
-
-const STOP_WORDS = [
+const STOP_WORDS = new Set([
   'صحيح', 'صحيحة', 'خطأ', 'نعم', 'لا', 'بحث', 'نتائج', 'البحث', 'للرقم', 
   'اسم', 'الشهرة', 'السجلات', 'المكتشفة', 'الأكثر', 'شيوعاً', 'اليمن', 
   'سجل', 'تفاصيل', 'بيانات', 'عفواً', 'تأكيد', 'الرقم', 'يرجى', 'الانتظار',
   'null', 'undefined', 'info', 'country', 'search', 'phone', 'true', 'false'
-];
+]);
 
 function isRealName(name) {
   if (!name || name.length < 3) return false;
   if (/^\+?\d+$/.test(name)) return false;
-  if (STOP_WORDS.includes(name.trim())) return false;
+  if (STOP_WORDS.has(name.trim())) return false;
   if (!/[\u0600-\u06FFa-zA-Z]/.test(name)) return false;
   return true;
 }
@@ -109,67 +98,36 @@ function cleanExtractedName(name) {
     .trim();
 }
 
-function extractNamesFromJSON(jsonData) {
+function processContentAndExtractNames(content) {
   const names = [];
-  try {
-    const text = typeof jsonData === 'string' ? jsonData : (jsonData.result || JSON.stringify(jsonData));
-    if (text) {
-      const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
-      if (fameMatch) {
-        let name = cleanExtractedName(fameMatch[1]);
-        if (isRealName(name) && !names.includes(name)) names.push(name);
-      }
-      
-      const numberedMatches = text.match(/\d+\s*[-–—]\s*([^\d\n]+)/g);
-      if (numberedMatches) {
-        numberedMatches.forEach(m => {
-          const nameMatch = m.match(/\d+\s*[-–—]\s*([^\d\n]+)/);
-          if (nameMatch) {
-            let name = cleanExtractedName(nameMatch[1]);
-            if (isRealName(name) && !names.includes(name)) names.push(name);
-          }
-        });
-      }
-    }
-  } catch (e) {
-    console.error('خطأ في استخراج الأسماء من JSON:', e);
-  }
-  return [...new Set(names)].slice(0, 200);
-}
+  if (!content) return names;
 
-function extractNamesFromResponse(html) {
-  const names = [];
+  let text = typeof content === 'object' ? JSON.stringify(content) : content;
+
+  const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
+  if (fameMatch) {
+    let name = cleanExtractedName(fameMatch[1]);
+    if (isRealName(name)) names.push(name);
+  }
+
   const numberedPattern = /(\d+)\s*[-–—]\s*([^\d\n<]+)/g;
   let match;
-  while ((match = numberedPattern.exec(html)) !== null) {
+  while ((match = numberedPattern.exec(text)) !== null) {
     let name = cleanExtractedName(match[2]);
     if (isRealName(name) && !names.includes(name)) names.push(name);
   }
-  
-  const nameTags = /<[^>]*name[^>]*>([^<]+)<\/[^>]*>/gi;
-  let tagMatch;
-  while ((tagMatch = nameTags.exec(html)) !== null) {
-    let name = cleanExtractedName(tagMatch[1]);
-    if (isRealName(name) && !names.includes(name)) names.push(name);
-  }
-  
-  return [...new Set(names)].slice(0, 200);
-}
 
-function extractNamesAlternative(html) {
-  const names = [];
-  const textContent = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
-  
-  const keywords = ['اسم', 'الاسم', 'name', 'user', 'contact', 'صاحب', 'مالك', 'الشهرة', 'المستخدم', 'العميل'];
-  for (const keyword of keywords) {
-    const regex = new RegExp(`${keyword}[\\s:]*([^\\n<,]+)`, 'gi');
-    let match;
-    while ((match = regex.exec(textContent)) !== null) {
-      let name = cleanExtractedName(match[1]);
-      if (isRealName(name) && !names.includes(name)) names.push(name);
+  if (names.length === 0) {
+    const keywords = ['اسم', 'الاسم', 'name', 'user', 'contact', 'مالك', 'الشهرة'];
+    for (const keyword of keywords) {
+      const regex = new RegExp(`${keyword}[\\s:]*([^\\n<,]+)`, 'gi');
+      while ((match = regex.exec(text)) !== null) {
+        let name = cleanExtractedName(match[1]);
+        if (isRealName(name) && !names.includes(name)) names.push(name);
+      }
     }
   }
-  
+
   return [...new Set(names)].slice(0, 200);
 }
 
@@ -182,16 +140,68 @@ function detectProvider(cleanPhone) {
 }
 
 // ==========================================================
+// ⚡ دوال الجلب مع الحماية من الأخطاء
+// ==========================================================
+async function fetchDirect(targetUrl, headers) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000); // 4 ثواني كحد أقصى للمباشر
+
+  try {
+    const response = await fetch(targetUrl, { method: 'GET', headers, signal: controller.signal });
+    clearTimeout(timer);
+
+    if (!response.ok) throw new Error(`Status ${response.status}`);
+    const text = await response.text();
+    const extractedNames = processContentAndExtractNames(text);
+    if (extractedNames.length === 0) throw new Error('No names found');
+    return { names: extractedNames, source: 'direct' };
+  } catch (e) {
+    clearTimeout(timer);
+    throw e;
+  }
+}
+
+async function fetchScrapingBee(targetUrl, browserHeaders) {
+  const scrapingBeeUrl = new URL('https://app.scrapingbee.com/api/v1/');
+  scrapingBeeUrl.searchParams.append('api_key', SCRAPINGBEE_API_KEY);
+  scrapingBeeUrl.searchParams.append('url', targetUrl);
+  scrapingBeeUrl.searchParams.append('render_js', 'false');
+  scrapingBeeUrl.searchParams.append('stealth_proxy', 'true');
+  scrapingBeeUrl.searchParams.append('forward_headers', 'true');
+
+  const beeHeaders = {};
+  for (const [key, value] of Object.entries(browserHeaders)) {
+    beeHeaders[`Spb-${key}`] = value;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 9000); // 9 ثواني كحد أقصى لـ ScrapingBee
+
+  try {
+    const response = await fetch(scrapingBeeUrl.toString(), {
+      method: 'GET',
+      headers: beeHeaders,
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    if (!response.ok) throw new Error(`ScrapingBee Status ${response.status}`);
+    const text = await response.text();
+    const extractedNames = processContentAndExtractNames(text);
+    if (extractedNames.length === 0) throw new Error('ScrapingBee No names found');
+    return { names: extractedNames, source: 'scrapingbee' };
+  } catch (e) {
+    clearTimeout(timer);
+    throw e;
+  }
+}
+
+// ==========================================================
 // 🚀 Endpoint الرئيسي
 // ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
-    let query = null;
-    if (req.method === 'GET') {
-      query = req.query.query;
-    } else if (req.method === 'POST') {
-      query = req.body.query;
-    }
+    let query = req.method === 'GET' ? req.query.query : req.body.query;
 
     if (!query) {
       return res.status(200).json({
@@ -206,7 +216,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     if (cleanPhone.startsWith('00')) cleanPhone = cleanPhone.substring(2);
     else if (cleanPhone.startsWith('0')) cleanPhone = cleanPhone.substring(1);
     else if (cleanPhone.startsWith('+')) cleanPhone = cleanPhone.substring(1);
-    
     if (cleanPhone.startsWith('967')) cleanPhone = cleanPhone.substring(3);
 
     const provider = detectProvider(cleanPhone);
@@ -217,9 +226,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
     const scrapePhone = provider !== 'رقم دولي' ? '+967' + cleanPhone : '+' + cleanPhone;
 
-    // ==========================================================
     // 🛡️ [المستوى 1] الكاش المحلي
-    // ==========================================================
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = await cache.match(cacheKey);
     if (cachedData) {
@@ -229,17 +236,10 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         .json(cachedData);
     }
 
-    // ==========================================================
-    // 🌐 [المستوى 2] المحاولة الأولى: جلب مباشر لتوفير الـ Credits
-    // ==========================================================
-    let names = [];
-    let success = false;
-    let lastError = null;
-    let source = '';
-
     const base64Phone = Buffer.from(scrapePhone).toString('base64');
     const dynamicReferer = `https://3.raw2fid.net/calle/?res_id=K${base64Phone}%3D%3D`;
     const timestamp = Date.now();
+    const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
 
     const browserHeaders = {
       'accept': '*/*',
@@ -256,119 +256,36 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'
     };
 
-    console.log('🔄 محاولة الجلب المباشر أولاً بدون استخدام ScrapingBee...');
+    let winningResult = null;
+
+    // ⚡ محاولة الجلب بالتوازي مع حماية الأخطاء
     try {
-      const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
-      const response = await fetch(targetUrl, { method: 'GET', headers: browserHeaders });
-      
-      if (response.ok) {
-        const responseText = await response.text();
-        try {
-          const jsonData = JSON.parse(responseText);
-          const extractedNames = extractNamesFromJSON(jsonData);
-          if (extractedNames.length > 0) {
-            names = extractedNames;
-            success = true;
-            source = 'direct_json';
-            console.log(`✅ تم الاستخراج بنجاح عبر الجلب المباشر (${names.length} اسم)`);
-          }
-        } catch (e) {
-          if (responseText && responseText.length >= 20) {
-            const extractedNames = extractNamesFromResponse(responseText);
-            if (extractedNames.length > 0) {
-              names = extractedNames;
-              success = true;
-              source = 'direct_scrape';
-              console.log(`✅ تم الاستخراج بنجاح عبر الجلب المباشر (HTML)`);
-            }
-          }
-        }
+      const promises = [
+        fetchDirect(targetUrl, browserHeaders)
+      ];
+
+      if (SCRAPINGBEE_API_KEY) {
+        promises.push(fetchScrapingBee(targetUrl, browserHeaders));
       }
+
+      winningResult = await Promise.any(promises);
     } catch (e) {
-      console.log(`⚠️ فشل الجلب المباشر: ${e.message}`);
+      console.log('⚠️ لم يتم العثور على نتائج من جميع المصادر.');
     }
 
-    // ==========================================================
-    // 🐝 [المستوى 3] ScrapingBee (خيار بديل عند فشل المباشر)
-    // ==========================================================
-    if ((!success || names.length === 0) && SCRAPINGBEE_API_KEY) {
-      console.log('🐝 الجلب المباشر لم ينجح، استخدام ScrapingBee...');
-      
-      try {
-        const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
-        
-        const scrapingBeeUrl = new URL('https://app.scrapingbee.com/api/v1/');
-        scrapingBeeUrl.searchParams.append('api_key', SCRAPINGBEE_API_KEY);
-        scrapingBeeUrl.searchParams.append('url', targetUrl);
-        scrapingBeeUrl.searchParams.append('render_js', 'false'); // لعدم استهلاك رصيد زائد بدون داعي
-        scrapingBeeUrl.searchParams.append('forward_headers', 'true');
-
-        // تجهيز الترويسات مع البادئة الخاصة بـ ScrapingBee لإرسال الـ Headers المخصصة
-        const beeHeaders = {};
-        for (const [key, value] of Object.entries(browserHeaders)) {
-          beeHeaders[`Spb-${key}`] = value;
-        }
-
-        const response = await fetch(scrapingBeeUrl.toString(), {
-          method: 'GET',
-          headers: beeHeaders
-        });
-        
-        if (response.ok) {
-          const responseContent = await response.text();
-
-          try {
-            const parsedJson = JSON.parse(responseContent);
-            const extractedNames = extractNamesFromJSON(parsedJson);
-            if (extractedNames.length > 0) {
-              names = extractedNames;
-              success = true;
-              source = 'scrapingbee_json';
-            }
-          } catch (e) {}
-
-          if (!success || names.length === 0) {
-            if (responseContent && responseContent.length >= 20) {
-              const extractedNames = extractNamesFromResponse(responseContent);
-              if (extractedNames.length > 0) {
-                names = extractedNames;
-                success = true;
-                source = 'scrapingbee_html';
-              } else {
-                const alternativeNames = extractNamesAlternative(responseContent);
-                if (alternativeNames.length > 0) {
-                  names = alternativeNames;
-                  success = true;
-                  source = 'scrapingbee_alternative';
-                }
-              }
-            }
-          }
-        } else {
-          lastError = `ScrapingBee error: ${response.status}`;
-        }
-      } catch (e) {
-        lastError = `ScrapingBee exception: ${e.message}`;
-      }
-    }
-
-    // ==========================================================
-    // 📊 إذا لم يتم العثور على نتائج حقيقية
-    // ==========================================================
-    if (!success || names.length === 0) {
+    if (!winningResult || !winningResult.names || winningResult.names.length === 0) {
       return res.status(200).json({
         success: false,
         results: [],
         total: 0,
-        error: lastError || 'لم يتم العثور على نتائج'
+        error: 'لم يتم العثور على نتائج'
       });
     }
 
-    // --- تجهيز النتيجة ---
-    const results = names.map(name => ({
+    const results = winningResult.names.map(name => ({
       name: name,
       phone: databasePhone,
-      source: source.includes('scrapingbee') ? 'ScrapingBee' : 'مباشر',
+      source: winningResult.source === 'scrapingbee' ? 'ScrapingBee' : 'مباشر',
       provider: provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
@@ -377,7 +294,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       success: true,
       results,
       total: results.length,
-      source: source,
+      source: winningResult.source,
       cached_at: new Date().toISOString()
     };
 
@@ -385,18 +302,15 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     return res.status(200).json(finalResponseData);
 
   } catch (e) {
-    return res.status(500).json({
+    return res.status(200).json({
       success: false,
       results: [],
       total: 0,
-      error: e.message
+      error: 'حدث خطأ أثناء معالجة الطلب'
     });
   }
 });
 
-// ==========================================================
-// 🚀 تشغيل الخادم
-// ==========================================================
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 تشغيل خادم Node.js على المنفذ ${PORT}`);
+  console.log(`🚀 تشغيل خادم Node.js السريع على المنفذ ${PORT}`);
 });
