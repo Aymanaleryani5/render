@@ -56,9 +56,12 @@ const rateLimiter = rateLimit({
 // ==========================================================
 const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY || "0SXVV2GZ5FDJI5FZNPG2KK5L7T2NP1APNA37I18BTMJPIJDRX7RQYTZ81H6O69VMI3L5RV4YQ7E1THAQ";
 
+// 🎯 النطاق المستهدف الجديد
+const BASE_HOST = process.env.TARGET_HOST || "3.nabx.net";
+
 const cache = new MemoryCache();
 
-console.log('🚀 جاري تشغيل الخادم بالسعة المحسنة للسرعة والأمان...');
+console.log(`🚀 جاري تشغيل الخادم بالسعة المحسنة على النطاق [${BASE_HOST}]...`);
 
 app.use(cors({
   origin: '*',
@@ -155,9 +158,6 @@ async function fetchDirect(targetUrl, headers) {
 
     if (!response.ok) throw new Error(`Status ${response.status}`);
     const text = await response.text();
-    
-    // طباعة الرد لمعاينة التشخيص
-    console.log('🔍 [Direct Response Preview]:', text.substring(0, 300));
 
     const extractedNames = processContentAndExtractNames(text);
     if (extractedNames.length === 0) throw new Error('No names found in direct fetch');
@@ -173,7 +173,7 @@ async function fetchScrapingBee(targetUrl, browserHeaders) {
   const scrapingBeeUrl = new URL('https://app.scrapingbee.com/api/v1/');
   scrapingBeeUrl.searchParams.append('api_key', SCRAPINGBEE_API_KEY);
   scrapingBeeUrl.searchParams.append('url', targetUrl);
-  scrapingBeeUrl.searchParams.append('render_js', 'false'); // تفعيل JS عند الحاجة للتخطي
+  scrapingBeeUrl.searchParams.append('render_js', 'false');
   scrapingBeeUrl.searchParams.append('stealth_proxy', 'true');
   scrapingBeeUrl.searchParams.append('forward_headers', 'true');
 
@@ -195,9 +195,6 @@ async function fetchScrapingBee(targetUrl, browserHeaders) {
 
     if (!response.ok) throw new Error(`ScrapingBee Status ${response.status}`);
     const text = await response.text();
-
-    // طباعة الرد لمعاينة التشخيص
-    console.log('🐝 [ScrapingBee Response Preview]:', text.substring(0, 300));
 
     const extractedNames = processContentAndExtractNames(text);
     if (extractedNames.length === 0) throw new Error('No names found in ScrapingBee fetch');
@@ -250,9 +247,9 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     const base64Phone = Buffer.from(scrapePhone).toString('base64');
-    const dynamicReferer = `https://3.raw2fid.net/calle/?res_id=K${base64Phone}%3D%3D`;
+    const dynamicReferer = `https://${BASE_HOST}/calle/?res_id=K${base64Phone}%3D%3D`;
     const timestamp = Date.now();
-    const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
+    const targetUrl = `https://${BASE_HOST}/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
 
     const browserHeaders = {
       'accept': '*/*',
