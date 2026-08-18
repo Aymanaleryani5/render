@@ -13,17 +13,17 @@ const PORT = process.env.PORT || 3000;
 
 class MemoryCache {
   constructor() {
-    This.cache = new NodeCache({ stdTTL: 2592000, checkperiod: 86400 });
+    this.cache = new NodeCache({ stdTTL: 2592000, checkperiod: 86400 });
   }
 
   async match(requestKey) {
-    Const entry = this.cache.get(requestKey);
-    If (!entry) return null;
-    Return entry;
+    const entry = this.cache.get(requestKey);
+    if (!entry) return null;
+    return entry;
   }
 
   async put(requestKey, responseData) {
-    This.cache.set(requestKey, responseData);
+    this.cache.set(requestKey, responseData);
   }
 
   cleanup() {
@@ -34,73 +34,73 @@ class MemoryCache {
 // ==========================================================
 // 📊 نظام تحديد المعدل (Rate Limiting)
 // ==========================================================
-Const rateLimiter = rateLimit({
-  WindowMs: 3 * 1000, // 3 ثواني
-  Max: 1, // طلب واحد لكل IP
-  Message: JSON.stringify({
-    Success: false,
-    Results: [],
-    Total: 0,
-    Error: 'مهلاً! الرجاء الانتظار',
-    Message: '⏳ يرجى الانتظار 3 ثواني بين عمليات البحث'
+const rateLimiter = rateLimit({
+  windowMs: 3 * 1000, // 3 ثواني
+  max: 1, // طلب واحد لكل IP
+  message: JSON.stringify({
+    success: false,
+    results: [],
+    total: 0,
+    error: 'مهلاً! الرجاء الانتظار',
+    message: '⏳ يرجى الانتظار 3 ثواني بين عمليات البحث'
   }),
-  KeyGenerator: (req) => {
-    Return req.headers['cf-connecting-ip'] || 
-           Req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
-           Req.ip ||
+  keyGenerator: (req) => {
+    return req.headers['cf-connecting-ip'] || 
+           req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+           req.ip ||
            'anonymous';
   },
-  Handler: (req, res) => {
-    Res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    Res.status(429).json(JSON.parse(rateLimiter.message));
+  handler: (req, res) => {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.status(429).json(JSON.parse(rateLimiter.message));
   }
 });
 
 // ==========================================================
 // 🌐 متغيرات البيئة ومفتاح ScrapingAPI
 // ==========================================================
-Const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "654649b0128a453b96288f7685c28f4f";
+const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "654649b0128a453b96288f7685c28f4f";
 
 // إنشاء مثيلات
-Const cache = new MemoryCache();
+const cache = new MemoryCache();
 
-Console.log('🚀 جاري تشغيل الخادم...');
-Console.log(`🐝 ScrapingAPI API Key: ${SCRAPINGAPI_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
+console.log('🚀 جاري تشغيل الخادم...');
+console.log(`🐝 ScrapingAPI API Key: ${SCRAPINGAPI_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
 
 // ==========================================================
 // 🚀 Middleware
 // ==========================================================
-App.use(cors({
-  Origin: '*',
-  Methods: ['GET', 'POST', 'OPTIONS'],
-  AllowedHeaders: ['Content-Type']
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type']
 }));
 
-App.use(express.json());
+app.use(express.json());
 
 // ==========================================================
 // 📝 دوال استخراج وتنظيف الأسماء
 // ==========================================================
 
-Const STOP_WORDS = [
+const STOP_WORDS = [
   'صحيح', 'صحيحة', 'خطأ', 'نعم', 'لا', 'بحث', 'نتائج', 'البحث', 'للرقم', 
   'اسم', 'الشهرة', 'السجلات', 'المكتشفة', 'الأكثر', 'شيوعاً', 'شيوعا', 'اليمن', 
   'سجل', 'تفاصيل', 'بيانات', 'عفواً', 'تأكيد', 'الرقم', 'يرجى', 'الانتظار',
   'null', 'undefined', 'info', 'country', 'search', 'phone', 'true', 'false'
 ];
 
-Function isRealName(name) {
-  If (!name || name.length < 3) return false;
-  If (/^\+?\d+$/.test(name)) return false;
-  If (STOP_WORDS.includes(name.trim())) return false;
-  If (!/[\u0600-\u06FFa-zA-Z]/.test(name)) return false;
-  Return true;
+function isRealName(name) {
+  if (!name || name.length < 3) return false;
+  if (/^\+?\d+$/.test(name)) return false;
+  if (STOP_WORDS.includes(name.trim())) return false;
+  if (!/[\u0600-\u06FFa-zA-Z]/.test(name)) return false;
+  return true;
 }
 
-Function cleanExtractedName(name) {
-  If (!name) return '';
+function cleanExtractedName(name) {
+  if (!name) return '';
   
-  Let cleaned = name
+  let cleaned = name
     // 1. إزالة العبارات والجمل النصية الزائدة من الواجهة
     .replace(/عدد\s*السجلات\s*المكتشفة/gi, '')
     .replace(/هذا\s*الاسم\s*هو\s*الأكثر\s*شيوعاً\s*لهذا\s*الرقم/gi, '')
@@ -109,127 +109,127 @@ Function cleanExtractedName(name) {
     .replace(/[\\{}{}\[\]"':\-_,\/|\.]/g, ' ');
 
   // 2. إزالة كلمات التوقف المحددة وتنظيف المسافات (مع الإبقاء على الكلمات مثل Liu)
-  Return cleaned
+  return cleaned
     .replace(/\b(عدد|السجلات|المكتشفة|الأكثر|شيوعا|شيوعاً|لهذا|الرقم|يرجى|الانتظار|البحث|نتائج|اسم|الشهرة|هاتف|ثابت)\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-Function extractNamesFromJSON(jsonData) {
-  Const names = [];
-  Try {
-    Const text = typeof jsonData === 'string' ? JsonData : (jsonData.result || JSON.stringify(jsonData));
-    If (text) {
-      Const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
-      If (fameMatch) {
-        Let name = cleanExtractedName(fameMatch[1]);
-        If (isRealName(name) && !names.includes(name)) names.push(name);
+function extractNamesFromJSON(jsonData) {
+  const names = [];
+  try {
+    const text = typeof jsonData === 'string' ? jsonData : (jsonData.result || JSON.stringify(jsonData));
+    if (text) {
+      const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
+      if (fameMatch) {
+        let name = cleanExtractedName(fameMatch[1]);
+        if (isRealName(name) && !names.includes(name)) names.push(name);
       }
       
-      Const numberedMatches = text.match(/\d+\s*[-–—]\s*([^\d\n]+)/g);
-      If (numberedMatches) {
-        NumberedMatches.forEach(m => {
-          Const nameMatch = m.match(/\d+\s*[-–—]\s*([^\d\n]+)/);
-          If (nameMatch) {
-            Let name = cleanExtractedName(nameMatch[1]);
-            If (isRealName(name) && !names.includes(name)) names.push(name);
+      const numberedMatches = text.match(/\d+\s*[-–—]\s*([^\d\n]+)/g);
+      if (numberedMatches) {
+        numberedMatches.forEach(m => {
+          const nameMatch = m.match(/\d+\s*[-–—]\s*([^\d\n]+)/);
+          if (nameMatch) {
+            let name = cleanExtractedName(nameMatch[1]);
+            if (isRealName(name) && !names.includes(name)) names.push(name);
           }
         });
       }
     }
   } catch (e) {
-    Console.error('خطأ في استخراج الأسماء من JSON:', e);
+    console.error('خطأ في استخراج الأسماء من JSON:', e);
   }
-  Return [...new Set(names)].slice(0, 200);
+  return [...new Set(names)].slice(0, 200);
 }
 
-Function extractNamesFromResponse(html) {
-  Const names = [];
-  Const numberedPattern = /(\d+)\s*[-–—]\s*([^\d\n<]+)/g;
-  Let match;
-  While ((match = numberedPattern.exec(html)) !== null) {
-    Let name = cleanExtractedName(match[2]);
-    If (isRealName(name) && !names.includes(name)) names.push(name);
+function extractNamesFromResponse(html) {
+  const names = [];
+  const numberedPattern = /(\d+)\s*[-–—]\s*([^\d\n<]+)/g;
+  let match;
+  while ((match = numberedPattern.exec(html)) !== null) {
+    let name = cleanExtractedName(match[2]);
+    if (isRealName(name) && !names.includes(name)) names.push(name);
   }
   
-  Const nameTags = /<[^>]*name[^>]*>([^<]+)<\/[^>]*>/gi;
-  Let tagMatch;
-  While ((tagMatch = nameTags.exec(html)) !== null) {
-    Let name = cleanExtractedName(tagMatch[1]);
-    If (isRealName(name) && !names.includes(name)) names.push(name);
+  const nameTags = /<[^>]*name[^>]*>([^<]+)<\/[^>]*>/gi;
+  let tagMatch;
+  while ((tagMatch = nameTags.exec(html)) !== null) {
+    let name = cleanExtractedName(tagMatch[1]);
+    if (isRealName(name) && !names.includes(name)) names.push(name);
   }
   
-  Return [...new Set(names)].slice(0, 200);
+  return [...new Set(names)].slice(0, 200);
 }
 
-Function extractNamesAlternative(html) {
-  Const names = [];
-  Const textContent = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+function extractNamesAlternative(html) {
+  const names = [];
+  const textContent = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
   
-  Const keywords = ['اسم', 'الاسم', 'name', 'user', 'contact', 'صاحب', 'مالك', 'الشهرة', 'المستخدم', 'العميل'];
-  For (const keyword of keywords) {
-    Const regex = new RegExp(`${keyword}[\\s:]*([^\\n<,]+)`, 'gi');
-    Let match;
-    While ((match = regex.exec(textContent)) !== null) {
-      Let name = cleanExtractedName(match[1]);
-      If (isRealName(name) && !names.includes(name)) names.push(name);
+  const keywords = ['اسم', 'الاسم', 'name', 'user', 'contact', 'صاحب', 'مالك', 'الشهرة', 'المستخدم', 'العميل'];
+  for (const keyword of keywords) {
+    const regex = new RegExp(`${keyword}[\\s:]*([^\\n<,]+)`, 'gi');
+    let match;
+    while ((match = regex.exec(textContent)) !== null) {
+      let name = cleanExtractedName(match[1]);
+      if (isRealName(name) && !names.includes(name)) names.push(name);
     }
   }
   
-  Return [...new Set(names)].slice(0, 200);
+  return [...new Set(names)].slice(0, 200);
 }
 
-Function detectProvider(cleanPhone) {
-  If (/^(77|78)[0-9]{7}$/.test(cleanPhone)) return 'يمن موبايل';
-  If (/^(73)[0-9]{7}$/.test(cleanPhone)) return 'YOU';
-  If (/^(71)[0-9]{7}$/.test(cleanPhone)) return 'سبأفون';
-  If (/^(70)[0-9]{7}$/.test(cleanPhone)) return 'واي';
-  Return 'رقم دولي';
+function detectProvider(cleanPhone) {
+  if (/^(77|78)[0-9]{7}$/.test(cleanPhone)) return 'يمن موبايل';
+  if (/^(73)[0-9]{7}$/.test(cleanPhone)) return 'YOU';
+  if (/^(71)[0-9]{7}$/.test(cleanPhone)) return 'سبأفون';
+  if (/^(70)[0-9]{7}$/.test(cleanPhone)) return 'واي';
+  return 'رقم دولي';
 }
 
 // ==========================================================
 // 🚀 Endpoint الرئيسي
 // ==========================================================
-App.all('/api/search', rateLimiter, async (req, res) => {
-  Try {
-    Let query = null;
-    If (req.method === 'GET') {
-      Query = req.query.query;
+app.all('/api/search', rateLimiter, async (req, res) => {
+  try {
+    let query = null;
+    if (req.method === 'GET') {
+      query = req.query.query;
     } else if (req.method === 'POST') {
-      Query = req.body.query;
+      query = req.body.query;
     }
 
-    If (!query) {
-      Return res.status(200).json({
-        Success: false,
-        Results: [],
-        Total: 0,
-        Error: 'البحث فارغ'
+    if (!query) {
+      return res.status(200).json({
+        success: false,
+        results: [],
+        total: 0,
+        error: 'البحث فارغ'
       });
     }
 
-    Let cleanPhone = query.trim().replace(/\s+/g, '').replace(/[-()]/g, '');
-    If (cleanPhone.startsWith('00')) cleanPhone = cleanPhone.substring(2);
-    Else if (cleanPhone.startsWith('0')) cleanPhone = cleanPhone.substring(1);
-    Else if (cleanPhone.startsWith('+')) cleanPhone = cleanPhone.substring(1);
+    let cleanPhone = query.trim().replace(/\s+/g, '').replace(/[-()]/g, '');
+    if (cleanPhone.startsWith('00')) cleanPhone = cleanPhone.substring(2);
+    else if (cleanPhone.startsWith('0')) cleanPhone = cleanPhone.substring(1);
+    else if (cleanPhone.startsWith('+')) cleanPhone = cleanPhone.substring(1);
     
-    If (cleanPhone.startsWith('967')) cleanPhone = cleanPhone.substring(3);
+    if (cleanPhone.startsWith('967')) cleanPhone = cleanPhone.substring(3);
 
-    Const provider = detectProvider(cleanPhone);
-    Let databasePhone = cleanPhone;
-    If (provider !== 'رقم دولي' && !databasePhone.startsWith('0')) {
-      DatabasePhone = '0' + databasePhone;
+    const provider = detectProvider(cleanPhone);
+    let databasePhone = cleanPhone;
+    if (provider !== 'رقم دولي' && !databasePhone.startsWith('0')) {
+      databasePhone = '0' + databasePhone;
     }
 
-    Const scrapePhone = provider !== 'رقم دولي' ? '+967' + cleanPhone : '+' + cleanPhone;
+    const scrapePhone = provider !== 'رقم دولي' ? '+967' + cleanPhone : '+' + cleanPhone;
 
     // ==========================================================
     // 🛡️ [المستوى 1] الكاش المحلي
     // ==========================================================
-    Const cacheKey = `phone_${databasePhone}`;
-    Const cachedData = await cache.match(cacheKey);
-    If (cachedData) {
-      Return res.status(200)
+    const cacheKey = `phone_${databasePhone}`;
+    const cachedData = await cache.match(cacheKey);
+    if (cachedData) {
+      return res.status(200)
         .set('X-Cache-Status', 'HIT')
         .set('X-Cache-Level', 'NODE_MEMORY_CACHE')
         .json(cachedData);
@@ -238,16 +238,16 @@ App.all('/api/search', rateLimiter, async (req, res) => {
     // ==========================================================
     // 🌐 [المستوى 2] المحاولة الأولى: جلب مباشر لتوفير الـ Credits
     // ==========================================================
-    Let names = [];
-    Let success = false;
-    Let lastError = null;
-    Let source = '';
+    let names = [];
+    let success = false;
+    let lastError = null;
+    let source = '';
 
-    Const base64Phone = Buffer.from(scrapePhone).toString('base64');
-    Const dynamicReferer = `https://ab.new9plus.com/calle/?res_id=K${base64Phone}%3D%3D`;
-    Const timestamp = Date.now();
+    const base64Phone = Buffer.from(scrapePhone).toString('base64');
+    const dynamicReferer = `https://ab.new9plus.com/calle/?res_id=K${base64Phone}%3D%3D`;
+    const timestamp = Date.now();
 
-    Const browserHeaders = {
+    const browserHeaders = {
       'accept': '*/*',
       'accept-language': 'en-US,en;q=0.9,ar;q=0.8',
       'cache-control': 'no-cache',
@@ -262,135 +262,135 @@ App.all('/api/search', rateLimiter, async (req, res) => {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'
     };
 
-    Console.log('🔄 محاولة الجلب المباشر أولاً بدون استخدام ScrapingAPI...');
-    Try {
-      Const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
-      Const response = await fetch(targetUrl, { method: 'GET', headers: browserHeaders });
+    console.log('🔄 محاولة الجلب المباشر أولاً بدون استخدام ScrapingAPI...');
+    try {
+      const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
+      const response = await fetch(targetUrl, { method: 'GET', headers: browserHeaders });
       
-      If (response.ok) {
-        Const responseText = await response.text();
-        Try {
-          Const jsonData = JSON.parse(responseText);
-          Const extractedNames = extractNamesFromJSON(jsonData);
-          If (extractedNames.length > 0) {
-            Names = extractedNames;
-            Success = true;
-            Source = 'direct_json';
-            Console.log(`✅ تم الاستخراج بنجاح عبر الجلب المباشر (${names.length} اسم)`);
+      if (response.ok) {
+        const responseText = await response.text();
+        try {
+          const jsonData = JSON.parse(responseText);
+          const extractedNames = extractNamesFromJSON(jsonData);
+          if (extractedNames.length > 0) {
+            names = extractedNames;
+            success = true;
+            source = 'direct_json';
+            console.log(`✅ تم الاستخراج بنجاح عبر الجلب المباشر (${names.length} اسم)`);
           }
         } catch (e) {
-          If (responseText && responseText.length >= 20) {
-            Const extractedNames = extractNamesFromResponse(responseText);
-            If (extractedNames.length > 0) {
-              Names = extractedNames;
-              Success = true;
-              Source = 'direct_scrape';
-              Console.log(`✅ تم الاستخراج بنجاح عبر الجلب المباشر (HTML)`);
+          if (responseText && responseText.length >= 20) {
+            const extractedNames = extractNamesFromResponse(responseText);
+            if (extractedNames.length > 0) {
+              names = extractedNames;
+              success = true;
+              source = 'direct_scrape';
+              console.log(`✅ تم الاستخراج بنجاح عبر الجلب المباشر (HTML)`);
             }
           }
         }
       }
     } catch (e) {
-      Console.log(`⚠️ فشل الجلب المباشر: ${e.message}`);
+      console.log(`⚠️ فشل الجلب المباشر: ${e.message}`);
     }
 
     // ==========================================================
     // 🐝 [المستوى 3] ScrapingAPI (خيار بديل عند فشل المباشر)
     // ==========================================================
-    If ((!success || names.length === 0) && SCRAPINGAPI_API_KEY) {
-      Console.log('🐝 الجلب المباشر لم ينجح، استخدام ScrapingAPI...');
+    if ((!success || names.length === 0) && SCRAPINGAPI_API_KEY) {
+      console.log('🐝 الجلب المباشر لم ينجح، استخدام ScrapingAPI...');
       
-      Try {
-        Const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
+      try {
+        const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
         
-        Const scrapingApiUrl = new URL('https://api.scraperapi.com/');
-        ScrapingApiUrl.searchParams.append('api_key', SCRAPINGAPI_API_KEY);
-        ScrapingApiUrl.searchParams.append('url', targetUrl);
-        ScrapingApiUrl.searchParams.append('render', 'false');       
-        ScrapingApiUrl.searchParams.append('premium_proxy', 'false');   
-        ScrapingApiUrl.searchParams.append('forward_headers', 'true');
+        const scrapingApiUrl = new URL('https://api.scraperapi.com/');
+        scrapingApiUrl.searchParams.append('api_key', SCRAPINGAPI_API_KEY);
+        scrapingApiUrl.searchParams.append('url', targetUrl);
+        scrapingApiUrl.searchParams.append('render', 'false');       
+        scrapingApiUrl.searchParams.append('premium_proxy', 'false');   
+        scrapingApiUrl.searchParams.append('forward_headers', 'true');
 
-        Const response = await fetch(scrapingApiUrl.toString(), {
-          Method: 'GET',
-          Headers: browserHeaders
+        const response = await fetch(scrapingApiUrl.toString(), {
+          method: 'GET',
+          headers: browserHeaders
         });
         
-        If (response.ok) {
-          Const responseContent = await response.text();
+        if (response.ok) {
+          const responseContent = await response.text();
 
-          Try {
-            Const parsedJson = JSON.parse(responseContent);
-            Const extractedNames = extractNamesFromJSON(parsedJson);
-            If (extractedNames.length > 0) {
-              Names = extractedNames;
-              Success = true;
-              Source = 'scrapingapi_json';
+          try {
+            const parsedJson = JSON.parse(responseContent);
+            const extractedNames = extractNamesFromJSON(parsedJson);
+            if (extractedNames.length > 0) {
+              names = extractedNames;
+              success = true;
+              source = 'scrapingapi_json';
             }
           } catch (e) {}
 
-          If (!success || names.length === 0) {
-            If (responseContent && responseContent.length >= 20) {
-              Const extractedNames = extractNamesFromResponse(responseContent);
-              If (extractedNames.length > 0) {
-                Names = extractedNames;
-                Success = true;
-                Source = 'scrapingapi_html';
+          if (!success || names.length === 0) {
+            if (responseContent && responseContent.length >= 20) {
+              const extractedNames = extractNamesFromResponse(responseContent);
+              if (extractedNames.length > 0) {
+                names = extractedNames;
+                success = true;
+                source = 'scrapingapi_html';
               } else {
-                Const alternativeNames = extractNamesAlternative(responseContent);
-                If (alternativeNames.length > 0) {
-                  Names = alternativeNames;
-                  Success = true;
-                  Source = 'scrapingapi_alternative';
+                const alternativeNames = extractNamesAlternative(responseContent);
+                if (alternativeNames.length > 0) {
+                  names = alternativeNames;
+                  success = true;
+                  source = 'scrapingapi_alternative';
                 }
               }
             }
           }
         } else {
-          LastError = `ScrapingAPI error: ${response.status}`;
+          lastError = `ScrapingAPI error: ${response.status}`;
         }
       } catch (e) {
-        LastError = `ScrapingAPI exception: ${e.message}`;
+        lastError = `ScrapingAPI exception: ${e.message}`;
       }
     }
 
     // ==========================================================
     // 📊 إذا لم يتم العثور على نتائج حقيقية
     // ==========================================================
-    If (!success || names.length === 0) {
-      Return res.status(200).json({
-        Success: false,
-        Results: [],
-        Total: 0,
-        Error: lastError || 'لم يتم العثور على نتائج'
+    if (!success || names.length === 0) {
+      return res.status(200).json({
+        success: false,
+        results: [],
+        total: 0,
+        error: lastError || 'لم يتم العثور على نتائج'
       });
     }
 
     // --- تجهيز النتيجة ---
-    Const results = names.map(name => ({
-      Name: name,
-      Phone: databasePhone,
-      Source: source.includes('scrapingapi') ? 'ScrapingAPI' : 'مباشر',
-      Provider: provider,
-      FormattedDate: new Date().toLocaleDateString('ar-EG')
+    const results = names.map(name => ({
+      name: name,
+      phone: databasePhone,
+      source: source.includes('scrapingapi') ? 'ScrapingAPI' : 'مباشر',
+      provider: provider,
+      formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
 
-    Const finalResponseData = {
-      Success: true,
-      Results,
-      Total: results.length,
-      Source: source,
-      Cached_at: new Date().toISOString()
+    const finalResponseData = {
+      success: true,
+      results,
+      total: results.length,
+      source: source,
+      cached_at: new Date().toISOString()
     };
 
-    Await cache.put(cacheKey, finalResponseData);
-    Return res.status(200).json(finalResponseData);
+    await cache.put(cacheKey, finalResponseData);
+    return res.status(200).json(finalResponseData);
 
   } catch (e) {
-    Return res.status(500).json({
-      Success: false,
-      Results: [],
-      Total: 0,
-      Error: e.message
+    return res.status(500).json({
+      success: false,
+      results: [],
+      total: 0,
+      error: e.message
     });
   }
 });
@@ -398,6 +398,6 @@ App.all('/api/search', rateLimiter, async (req, res) => {
 // ==========================================================
 // 🚀 تشغيل الخادم
 // ==========================================================
-App.listen(PORT, '0.0.0.0', () => {
-  Console.log(`🚀 تشغيل خادم Node.js على المنفذ ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 تشغيل خادم Node.js على المنفذ ${PORT}`);
 });
