@@ -51,69 +51,78 @@ const rateLimiter = rateLimit({
 });
 
 // ==========================================================
-// 🌐 التهيئة والتحكم بالطلبات المتزامنة (10 طلبات في وقت واحد)
+// 🌐 التهيئة والتحكم بالطلبات المتزامنة
 // ==========================================================
 const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "654649b0128a453b96288f7685c28f4f";
 const cache = new MemoryCache();
-const limit = pLimit(10); // تحديد الحد الأقصى للطلبات المتزامنة
+const limit = pLimit(10);
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json());
 
 // ==========================================================
-// 📝 دوال استخراج وتنظيف البيانات
+// 📝 دوال استخراج وتنظيف البيانات المحدثة
 // ==========================================================
-const STOP_WORDS = [
-  'صحيح', 'صحيحة', 'خطأ', 'نعم', 'لا', 'بحث', 'نتائج', 'البحث', 'للرقم', 
-  'اسم', 'الشهرة', 'السجلات', 'المكتشفة', 'الأكثر', 'شيوعاً', 'اليمن', 
-  'سجل', 'تفاصيل', 'بيانات', 'عفواً', 'تأكيد', 'الرقم', 'يرجى', 'الانتظار',
-  'null', 'undefined', 'info', 'country', 'search', 'phone', 'true', 'false'
-];
-
 function isRealName(name) {
-  if (!name || name.length < 3) return false;
-  if (/^\+?\d+$/.test(name)) return false;
-  if (STOP_WORDS.includes(name.trim())) return false;
-  if (!/[\u0600-\u06FFa-zA-Z]/.test(name)) return false;
+  if (!name) return false;
+  // استبعاد السطور التي تحتوي على رقم هاتف مجرد فقط
+  if (/^\+?\d+$/.test(name.trim())) return false;
   return true;
 }
 
 function cleanExtractedName(name) {
   if (!name) return '';
   return name
-    .replace(/نتائج\s*البحث\s*للرقم/gi, '')
-    .replace(/\|{2,}\s*split\s*\|{2,}/gi, '')
-    .replace(/\{.*?\}/g, '')
-    .replace(/[\\{}{}\[\]"':\-_,\/]/g, ' ')
-    .replace(/\b(info|country|n|null|undefined|الرقم|اسم|search|phone|نتائج|البحث|للرقم|الشهرة|السجلات|المكتشفة|الأكثر|شيوعاً|اليمن|من|هذا|هذه|كان|مع|عن|على|الى|حتى|بين|أو|و|ف|في|إلى|عند|ب|ك|ل|لل|و|ثم|حتى|لكن|ولا|أو|ثم|حيث|بين|عندما|ذلك|هذه|هذا|التي|الذي|الذين|اللاتي|اللواتي|منذ|خلال|بسبب|دون|بينما|حيثما|كلما|متى|أين|كيف|إذا|لن|لم|ما|لا|ليس|سوف|قد|ربما|لعل|ليت|لابد|لعل|لكي|كي|حتّى|حتى)\b/gi, '')
+    .replace(/<[^>]*>/g, '') // إزالة وسم الـ HTML
+    .replace(/[\\{}()\[\]"':_\/]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-function parseNames(text) {
+function parseNames(rawInput) {
   const names = [];
-  if (!text) return names;
-  
+  if (!rawInput) return names;
+
   try {
-    const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
-    if (fameMatch) {
-      let name = cleanExtractedName(fameMatch[1]);
-      if (isRealName(name)) names.push(name);
+    let text = rawInput;
+
+    // تحويل الاستجابة إلى نص إذا كانت قادمة كـ JSON
+    if (typeof rawInput === 'object') {
+      text = rawInput.result || JSON.stringify(rawInput);
+    } else {
+      try {
+        const parsed = JSON.parse(rawInput);
+        if (parsed && parsed.result) text = parsed.result;
+      } catch (e) {}
     }
-    
-    const numberedMatches = text.match(/\d+\s*[-–—]\s*([^\d\n<]+)/g);
-    if (numberedMatches) {
-      numberedMatches.forEach(m => {
-        const nameMatch = m.match(/\d+\s*[-–—]\s*([^\d\n<]+)/);
-        if (nameMatch) {
-          let name = cleanExtractedName(nameMatch[1]);
-          if (isRealName(name) && !names.includes(name)) names.push(name);
+
+    // فصل النص الأساسي عن التذييل التحليلي
+    const mainPart = text.split('|||SPLIT|||')[0] || text;
+
+    // استخراج اسم الشهرة إذا وجد
+    const fameMatch = mainPart.match(/اسم الشهرة[:\s]+([^<\n]+)/);
+    if (fameMatch && fameMatch[1]) {
+      let fameName = cleanExtractedName(fameMatch[1]);
+      if (isRealName(fameName)) names.push(fameName);
+    }
+
+    // استخراج كافة السطور المرقّمة مع الإبقاء على الأرقام والرموز داخل الاسم
+    const lines = mainPart.split(/\n|<br\s*\/?>/gi);
+    lines.forEach(line => {
+      let trimmed = line.replace(/<[^>]*>/g, '').trim();
+      if (!trimmed || trimmed.startsWith('📋')) return;
+
+      const match = trimmed.match(/^\d+\s*[-–—]\s*(.+)$/);
+      if (match && match[1]) {
+        let cleanName = cleanExtractedName(match[1]);
+        if (isRealName(cleanName) && !names.includes(cleanName)) {
+          names.push(cleanName);
         }
-      });
-    }
+      }
+    });
   } catch (e) {}
 
-  return [...new Set(names)].slice(0, 200);
+  return names;
 }
 
 function detectProvider(cleanPhone) {
@@ -124,7 +133,7 @@ function detectProvider(cleanPhone) {
   return 'رقم دولي';
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 2000) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 2500) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -183,17 +192,16 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     };
 
-    // تنفيذ المهمة داخل طابور p-limit
     const resultData = await limit(async () => {
       let fetchedNames = [];
       let source = '';
 
       // المحاولة الأولى: جلب مباشر
       try {
-        const response = await fetchWithTimeout(targetUrl, { method: 'GET', headers }, 1500);
+        const response = await fetchWithTimeout(targetUrl, { method: 'GET', headers }, 2000);
         if (response.ok) {
-          const text = await response.text();
-          fetchedNames = parseNames(text);
+          const rawText = await response.text();
+          fetchedNames = parseNames(rawText);
           if (fetchedNames.length > 0) source = 'direct';
         }
       } catch (e) {}
@@ -202,10 +210,10 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       if (fetchedNames.length === 0 && SCRAPINGAPI_API_KEY) {
         try {
           const scrapingUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false&premium_proxy=false`;
-          const response = await fetchWithTimeout(scrapingUrl, { method: 'GET', headers }, 4000);
+          const response = await fetchWithTimeout(scrapingUrl, { method: 'GET', headers }, 5000);
           if (response.ok) {
-            const text = await response.text();
-            fetchedNames = parseNames(text);
+            const rawText = await response.text();
+            fetchedNames = parseNames(rawText);
             if (fetchedNames.length > 0) source = 'scrapingapi';
           }
         } catch (e) {}
