@@ -297,14 +297,10 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       try {
         const targetUrl = `https://b.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
         
-        const scrapingApiUrl = new URL('https://api.scraperapi.com/');
-        scrapingApiUrl.searchParams.append('api_key', SCRAPINGAPI_API_KEY);
-        scrapingApiUrl.searchParams.append('url', targetUrl);
-        scrapingApiUrl.searchParams.append('render', 'false');       
-        scrapingApiUrl.searchParams.append('premium_proxy', 'false');   
-        scrapingApiUrl.searchParams.append('forward_headers', 'true');
+        // تشفير كامل للـ targetUrl لتفادي خطأ 404
+        const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false&premium_proxy=false&forward_headers=true`;
 
-        const response = await fetch(scrapingApiUrl.toString(), {
+        const response = await fetch(scrapingApiUrl, {
           method: 'GET',
           headers: browserHeaders
         });
