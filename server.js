@@ -25,7 +25,7 @@ class MemoryCache {
 }
 
 // ==========================================================
-// 📊 نظام تحديد المعدل (Rate Limiting) - الإعدادات الأصلية
+// 📊 نظام تحديد المعدل (Rate Limiting)
 // ==========================================================
 const rateLimiter = rateLimit({
   windowMs: 3 * 1000, // 3 ثواني
@@ -120,7 +120,6 @@ function detectProvider(cleanPhone) {
   return 'رقم دولي';
 }
 
-// دالة يجلب البيانات مع خيار مهلة زمنية (Timeout) لتسريع الانتقال
 async function fetchWithTimeout(url, options = {}, timeoutMs = 2000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -154,7 +153,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     let databasePhone = (provider !== 'رقم دولي' && !cleanPhone.startsWith('0')) ? '0' + cleanPhone : cleanPhone;
     const scrapePhone = provider !== 'رقم دولي' ? '+967' + cleanPhone : '+' + cleanPhone;
 
-    // 🛡️ الكاش المباشر السريع
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = cache.match(cacheKey);
     if (cachedData) {
@@ -176,7 +174,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
     };
 
-    // 🌐 [1] محاولة جلب مباشر سريعة جداً (سقف 2 ثانية فقط)
     try {
       const response = await fetchWithTimeout(targetUrl, { method: 'GET', headers: browserHeaders }, 2000);
       if (response.ok) {
@@ -192,11 +189,8 @@ app.all('/api/search', rateLimiter, async (req, res) => {
           source = 'direct';
         }
       }
-    } catch (e) {
-      // تجاوز المهلة أو فشل الاتصال المباشر -> الانتقال السريع للمرحلة التالية
-    }
+    } catch (e) {}
 
-    // 🐝 [2] ScrapingAPI بديل سريع
     if (!success && SCRAPINGAPI_API_KEY) {
       try {
         const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
@@ -221,6 +215,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
     }
 
+    // --- تجهيز النتائج مع استخدام phone فقط ---
     const results = names.map(name => ({
       name,
       phone: databasePhone,
