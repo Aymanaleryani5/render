@@ -229,37 +229,32 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         .json(cachedData);
     }
 
-    // ==========================================================
-    // 🌐 [المستوى 2] المحاولة الأولى: جلب مباشر لتوفير الـ Credits
-    // ==========================================================
     let names = [];
     let success = false;
     let lastError = null;
     let source = '';
 
+    // ==========================================================
+    // 🌐 [المستوى 2] المحاولة الأولى: جلب مباشر عبر POST لتفادي الحظر
+    // ==========================================================
     const base64Phone = Buffer.from(scrapePhone).toString('base64');
     const dynamicReferer = `https://3.raw2fid.net/calle/?res_id=K${base64Phone}%3D%3D`;
-    const timestamp = Date.now();
 
-    const browserHeaders = {
-      'accept': '*/*',
-      'accept-language': 'en-US,en;q=0.9,ar;q=0.8',
-      'cache-control': 'no-cache',
-      'pragma': 'no-cache',
-      'referer': dynamicReferer,
-      'sec-ch-ua': '"Not=A?Brand";v="99", "Google Chrome";v="151", "Chromium";v="151"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
-      'sec-fetch-dest': 'empty',
-      'sec-fetch-mode': 'cors',
-      'sec-fetch-site': 'same-origin',
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'
-    };
-
-    console.log('🔄 محاولة الجلب المباشر أولاً بدون استخدام ScrapingAPI...');
+    console.log('🔄 محاولة الجلب المباشر عبر POST بدلاً من GET...');
     try {
-      const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
-      const response = await fetch(targetUrl, { method: 'GET', headers: browserHeaders });
+      const response = await fetch('https://3.raw2fid.net/wp-admin/admin-ajax.php', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'referer': dynamicReferer,
+          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36',
+          'x-requested-with': 'XMLHttpRequest'
+        },
+        body: new URLSearchParams({
+          'action': 'alosh_search',
+          'phone': scrapePhone
+        })
+      });
       
       if (response.ok) {
         const responseText = await response.text();
@@ -289,24 +284,23 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🐝 [المستوى 3] ScrapingAPI (خيار بديل عند فشل المباشر)
+    // 🐝 [المستوى 3] ScrapingAPI (بدون forward_headers وبدون بروكسي مدفوع)
     // ==========================================================
     if ((!success || names.length === 0) && SCRAPINGAPI_API_KEY) {
-      console.log('🐝 الجلب المباشر لم ينجح، استخدام ScrapingAPI...');
+      console.log('🐝 الجلب المباشر لم ينجح، استخدام ScrapingAPI بدون بروكسي مدفوع...');
       
       try {
+        const timestamp = Date.now();
         const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
         
         const scrapingApiUrl = new URL('https://api.scraperapi.com/');
         scrapingApiUrl.searchParams.append('api_key', SCRAPINGAPI_API_KEY);
         scrapingApiUrl.searchParams.append('url', targetUrl);
-        scrapingApiUrl.searchParams.append('render', 'false');       
-        scrapingApiUrl.searchParams.append('premium_proxy', 'false');   
-        scrapingApiUrl.searchParams.append('forward_headers', 'true');
+        // تم إلغاء forward_headers و premium_proxy لمنع خطأ 500
 
         const response = await fetch(scrapingApiUrl.toString(), {
-          method: 'GET',
-          headers: browserHeaders
+          method: 'GET'
+          // عدم تمرير browserHeaders هنا لتجنب التعارض
         });
         
         if (response.ok) {
