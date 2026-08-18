@@ -26,8 +26,8 @@ class MemoryCache {
     this.cache.set(requestKey, responseData);
   }
 
-  cleanup() {
-    // NodeCache يقوم بالتنظيف تلقائياً
+  flush() {
+    this.cache.flushAll();
   }
 }
 
@@ -77,6 +77,25 @@ app.use(cors({
 }));
 
 app.use(express.json());
+
+// ==========================================================
+// 🧹 Endpoint تفريغ الكاش برمجيًا
+// ==========================================================
+app.get('/api/clear-cache', (req, res) => {
+  try {
+    cache.flush();
+    console.log('🧹 تم تفريغ الكاش بنجاح!');
+    return res.status(200).json({
+      success: true,
+      message: 'تم تفريغ كافة البيانات المخزنة في الكاش بنجاح'
+    });
+  } catch (e) {
+    return res.status(500).json({
+      success: false,
+      error: e.message
+    });
+  }
+});
 
 // ==========================================================
 // 📝 دوال استخراج وتنظيف الأسماء
