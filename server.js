@@ -1,4 +1,4 @@
-const express = require('express');
+Const express = require('express');
 const cors = require('cors');
 const NodeCache = require('node-cache');
 const rateLimit = require('express-rate-limit');
@@ -57,15 +57,15 @@ const rateLimiter = rateLimit({
 });
 
 // ==========================================================
-// 🌐 متغيرات البيئة ومفتاح ScrapingAPI
+// 🌐 متغيرات البيئة ومفتاح ScrapingBee
 // ==========================================================
-const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "654649b0128a453b96288f7685c28f4f";
+const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY || "0SXVV2GZ5FDJI5FZNPG2KK5L7T2NP1APNA37I18BTMJPIJDRX7RQYTZ81H6O69VMI3L5RV4YQ7E1THAQ";
 
 // إنشاء مثيلات
 const cache = new MemoryCache();
 
 console.log('🚀 جاري تشغيل الخادم...');
-console.log(`🐝 ScrapingAPI API Key: ${SCRAPINGAPI_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
+console.log(`🐝 ScrapingBee API Key: ${SCRAPINGBEE_API_KEY ? '✅ موجود' : '❌ غير موجود'}`);
 
 // ==========================================================
 // 🚀 Middleware
@@ -229,32 +229,37 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         .json(cachedData);
     }
 
+    // ==========================================================
+    // 🌐 [المستوى 2] المحاولة الأولى: جلب مباشر لتوفير الـ Credits
+    // ==========================================================
     let names = [];
     let success = false;
     let lastError = null;
     let source = '';
 
-    // ==========================================================
-    // 🌐 [المستوى 2] المحاولة الأولى: جلب مباشر عبر POST لتفادي الحظر
-    // ==========================================================
     const base64Phone = Buffer.from(scrapePhone).toString('base64');
     const dynamicReferer = `https://3.raw2fid.net/calle/?res_id=K${base64Phone}%3D%3D`;
+    const timestamp = Date.now();
 
-    console.log('🔄 محاولة الجلب المباشر عبر POST بدلاً من GET...');
+    const browserHeaders = {
+      'accept': '*/*',
+      'accept-language': 'en-US,en;q=0.9,ar;q=0.8',
+      'cache-control': 'no-cache',
+      'pragma': 'no-cache',
+      'referer': dynamicReferer,
+      'sec-ch-ua': '"Not=A?Brand";v="99", "Google Chrome";v="151", "Chromium";v="151"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'
+    };
+
+    console.log('🔄 محاولة الجلب المباشر أولاً بدون استخدام ScrapingBee...');
     try {
-      const response = await fetch('https://3.raw2fid.net/wp-admin/admin-ajax.php', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'referer': dynamicReferer,
-          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36',
-          'x-requested-with': 'XMLHttpRequest'
-        },
-        body: new URLSearchParams({
-          'action': 'alosh_search',
-          'phone': scrapePhone
-        })
-      });
+      const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
+      const response = await fetch(targetUrl, { method: 'GET', headers: browserHeaders });
       
       if (response.ok) {
         const responseText = await response.text();
@@ -284,23 +289,29 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     // ==========================================================
-    // 🐝 [المستوى 3] ScrapingAPI (بدون forward_headers وبدون بروكسي مدفوع)
+    // 🐝 [المستوى 3] ScrapingBee (خيار بديل عند فشل المباشر)
     // ==========================================================
-    if ((!success || names.length === 0) && SCRAPINGAPI_API_KEY) {
-      console.log('🐝 الجلب المباشر لم ينجح، استخدام ScrapingAPI بدون بروكسي مدفوع...');
+    if ((!success || names.length === 0) && SCRAPINGBEE_API_KEY) {
+      console.log('🐝 الجلب المباشر لم ينجح، استخدام ScrapingBee...');
       
       try {
-        const timestamp = Date.now();
         const targetUrl = `https://3.raw2fid.net/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${timestamp}`;
         
-        const scrapingApiUrl = new URL('https://api.scraperapi.com/');
-        scrapingApiUrl.searchParams.append('api_key', SCRAPINGAPI_API_KEY);
-        scrapingApiUrl.searchParams.append('url', targetUrl);
-        // تم إلغاء forward_headers و premium_proxy لمنع خطأ 500
+        const scrapingBeeUrl = new URL('https://app.scrapingbee.com/api/v1/');
+        scrapingBeeUrl.searchParams.append('api_key', SCRAPINGBEE_API_KEY);
+        scrapingBeeUrl.searchParams.append('url', targetUrl);
+        scrapingBeeUrl.searchParams.append('render_js', 'false'); // لعدم استهلاك رصيد زائد بدون داعي
+        scrapingBeeUrl.searchParams.append('forward_headers', 'true');
 
-        const response = await fetch(scrapingApiUrl.toString(), {
-          method: 'GET'
-          // عدم تمرير browserHeaders هنا لتجنب التعارض
+        // تجهيز الترويسات مع البادئة الخاصة بـ ScrapingBee لإرسال الـ Headers المخصصة
+        const beeHeaders = {};
+        for (const [key, value] of Object.entries(browserHeaders)) {
+          beeHeaders[`Spb-${key}`] = value;
+        }
+
+        const response = await fetch(scrapingBeeUrl.toString(), {
+          method: 'GET',
+          headers: beeHeaders
         });
         
         if (response.ok) {
@@ -312,7 +323,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
             if (extractedNames.length > 0) {
               names = extractedNames;
               success = true;
-              source = 'scrapingapi_json';
+              source = 'scrapingbee_json';
             }
           } catch (e) {}
 
@@ -322,22 +333,22 @@ app.all('/api/search', rateLimiter, async (req, res) => {
               if (extractedNames.length > 0) {
                 names = extractedNames;
                 success = true;
-                source = 'scrapingapi_html';
+                source = 'scrapingbee_html';
               } else {
                 const alternativeNames = extractNamesAlternative(responseContent);
                 if (alternativeNames.length > 0) {
                   names = alternativeNames;
                   success = true;
-                  source = 'scrapingapi_alternative';
+                  source = 'scrapingbee_alternative';
                 }
               }
             }
           }
         } else {
-          lastError = `ScrapingAPI error: ${response.status}`;
+          lastError = `ScrapingBee error: ${response.status}`;
         }
       } catch (e) {
-        lastError = `ScrapingAPI exception: ${e.message}`;
+        lastError = `ScrapingBee exception: ${e.message}`;
       }
     }
 
@@ -357,7 +368,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const results = names.map(name => ({
       name: name,
       phone: databasePhone,
-      source: source.includes('scrapingapi') ? 'ScrapingAPI' : 'مباشر',
+      source: source.includes('scrapingbee') ? 'ScrapingBee' : 'مباشر',
       provider: provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
