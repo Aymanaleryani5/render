@@ -104,12 +104,14 @@ function processContentAndExtractNames(content) {
 
   let text = typeof content === 'object' ? JSON.stringify(content) : content;
 
+  // فحص نمط اسم الشهرة
   const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
   if (fameMatch) {
     let name = cleanExtractedName(fameMatch[1]);
     if (isRealName(name)) names.push(name);
   }
 
+  // فحص الأنماط المرقّمة
   const numberedPattern = /(\d+)\s*[-–—]\s*([^\d\n<]+)/g;
   let match;
   while ((match = numberedPattern.exec(text)) !== null) {
@@ -117,6 +119,7 @@ function processContentAndExtractNames(content) {
     if (isRealName(name) && !names.includes(name)) names.push(name);
   }
 
+  // فحص الكلمات المفتاحية العامة
   if (names.length === 0) {
     const keywords = ['اسم', 'الاسم', 'name', 'user', 'contact', 'مالك', 'الشهرة'];
     for (const keyword of keywords) {
@@ -140,11 +143,11 @@ function detectProvider(cleanPhone) {
 }
 
 // ==========================================================
-// ⚡ دوال الجلب مع الحماية من الأخطاء
+// ⚡ دوال الجلب مع الحماية والـ Debug
 // ==========================================================
 async function fetchDirect(targetUrl, headers) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 4000); // 4 ثواني كحد أقصى للمباشر
+  const timer = setTimeout(() => controller.abort(), 5000);
 
   try {
     const response = await fetch(targetUrl, { method: 'GET', headers, signal: controller.signal });
@@ -152,11 +155,16 @@ async function fetchDirect(targetUrl, headers) {
 
     if (!response.ok) throw new Error(`Status ${response.status}`);
     const text = await response.text();
+    
+    // طباعة الرد لمعاينة التشخيص
+    console.log('🔍 [Direct Response Preview]:', text.substring(0, 300));
+
     const extractedNames = processContentAndExtractNames(text);
-    if (extractedNames.length === 0) throw new Error('No names found');
+    if (extractedNames.length === 0) throw new Error('No names found in direct fetch');
     return { names: extractedNames, source: 'direct' };
   } catch (e) {
     clearTimeout(timer);
+    console.log(`⚠️ Direct Fetch Failed: ${e.message}`);
     throw e;
   }
 }
@@ -165,7 +173,7 @@ async function fetchScrapingBee(targetUrl, browserHeaders) {
   const scrapingBeeUrl = new URL('https://app.scrapingbee.com/api/v1/');
   scrapingBeeUrl.searchParams.append('api_key', SCRAPINGBEE_API_KEY);
   scrapingBeeUrl.searchParams.append('url', targetUrl);
-  scrapingBeeUrl.searchParams.append('render_js', 'false');
+  scrapingBeeUrl.searchParams.append('render_js', 'false'); // تفعيل JS عند الحاجة للتخطي
   scrapingBeeUrl.searchParams.append('stealth_proxy', 'true');
   scrapingBeeUrl.searchParams.append('forward_headers', 'true');
 
@@ -175,7 +183,7 @@ async function fetchScrapingBee(targetUrl, browserHeaders) {
   }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 9000); // 9 ثواني كحد أقصى لـ ScrapingBee
+  const timer = setTimeout(() => controller.abort(), 10000);
 
   try {
     const response = await fetch(scrapingBeeUrl.toString(), {
@@ -187,11 +195,16 @@ async function fetchScrapingBee(targetUrl, browserHeaders) {
 
     if (!response.ok) throw new Error(`ScrapingBee Status ${response.status}`);
     const text = await response.text();
+
+    // طباعة الرد لمعاينة التشخيص
+    console.log('🐝 [ScrapingBee Response Preview]:', text.substring(0, 300));
+
     const extractedNames = processContentAndExtractNames(text);
-    if (extractedNames.length === 0) throw new Error('ScrapingBee No names found');
+    if (extractedNames.length === 0) throw new Error('No names found in ScrapingBee fetch');
     return { names: extractedNames, source: 'scrapingbee' };
   } catch (e) {
     clearTimeout(timer);
+    console.log(`⚠️ ScrapingBee Fetch Failed: ${e.message}`);
     throw e;
   }
 }
@@ -258,7 +271,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
     let winningResult = null;
 
-    // ⚡ محاولة الجلب بالتوازي مع حماية الأخطاء
+    // ⚡ محاولة الجلب بالتوازي مع التغليف الآمن
     try {
       const promises = [
         fetchDirect(targetUrl, browserHeaders)
@@ -270,7 +283,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
       winningResult = await Promise.any(promises);
     } catch (e) {
-      console.log('⚠️ لم يتم العثور على نتائج من جميع المصادر.');
+      console.log('❌ فشل جلب النتائج من جميع المصادر.');
     }
 
     if (!winningResult || !winningResult.names || winningResult.names.length === 0) {
