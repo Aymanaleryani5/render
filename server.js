@@ -8,11 +8,13 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ==========================================================
-// 📊 نظام الكاش (Memory Cache)
+// 📊 نظام الكاش (Memory Cache) - مدة الكاش 1 يوم
 // ==========================================================
 class MemoryCache {
   constructor() {
-    this.cache = new NodeCache({ stdTTL: 2592000, checkperiod: 86400 });
+    // stdTTL: 86400 (يوم واحد بالثواني)
+    // checkperiod: 3600 (التحقق كل ساعة لتنظيف الذاكرة)
+    this.cache = new NodeCache({ stdTTL: 86400, checkperiod: 3600 });
   }
 
   match(requestKey) {
