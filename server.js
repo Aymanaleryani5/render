@@ -7,9 +7,6 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ==========================================================
-// 📊 نظام الكاش
-// ==========================================================
 class MemoryCache {
   constructor() {
     this.cache = new NodeCache({ stdTTL: 2592000, checkperiod: 86400 });
@@ -24,34 +21,6 @@ class MemoryCache {
   }
 }
 
-// ==========================================================
-// 🛡️ تنويع User-Agents للحماية من الحظر
-// ==========================================================
-const USER_AGENTS = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
-  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1'
-];
-
-function getRandomUserAgent() {
-  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
-}
-
-// ==========================================================
-// 🔑 مصفوفة مفاتيح ScraperAPI (مفتاحين فقط)
-// ==========================================================
-const SCRAPINGAPI_KEYS = [
-  process.env.SCRAPINGAPI_API_KEY || "26617cf864e88b0c2f85ccc8a55155dc",
-  process.env.SCRAPINGAPI_API_KEY_BACKUP_1 || "16a5887f2b830c0a6c6a20f00228c0a8"
-].filter(Boolean);
-
-// ذاكرة لتتبع وتجاهل المفاتيح التي انتهى رصيدها فعلياً
-const DISABLED_KEYS = new Set();
-
-// ==========================================================
-// 📊 Rate Limiting (منع التكرار خلال 3 ثوانٍ)
-// ==========================================================
 const rateLimiter = rateLimit({
   windowMs: 3 * 1000,
   max: 1,
@@ -74,14 +43,12 @@ const rateLimiter = rateLimit({
   }
 });
 
+const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "26617cf864e88b0c2f85ccc8a55155dc";
 const cache = new MemoryCache();
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json());
 
-// ==========================================================
-// 📝 دوال الاستخراج والتنظيف
-// ==========================================================
 const STOP_WORDS = new Set([
   'صحيح', 'صحيحة', 'خطأ', 'نعم', 'لا', 'بحث', 'نتائج', 'البحث', 'للرقم', 
   'اسم', 'الشهرة', 'السجلات', 'المكتشفة', 'الأكثر', 'شيوعاً', 'شيوعا', 'اليمن', 
@@ -90,7 +57,7 @@ const STOP_WORDS = new Set([
 ]);
 
 function isRealName(name) {
-  if (!name || name.length < 3) return false;
+  if (!name || name.length < 2) return false;
   if (/^\+?\d+$/.test(name)) return false;
   if (STOP_WORDS.has(name.trim())) return false;
   return /[\u0600-\u06FFa-zA-Z]/.test(name);
@@ -105,33 +72,34 @@ function cleanExtractedName(name) {
     .trim();
 }
 
-function extractNamesFromText(text) {
+function extractNamesFromJSON(jsonData) {
   const names = new Set();
-  if (!text) return [];
-  
   try {
-    const jsonData = typeof text === 'object' ? text : JSON.parse(text);
-    const content = jsonData.result || JSON.stringify(jsonData);
-    
-    const fameMatch = content.match(/اسم الشهرة[:\s]+([^\n]+)/);
-    if (fameMatch) {
-      let name = cleanExtractedName(fameMatch[1]);
-      if (isRealName(name)) names.add(name);
+    const text = typeof jsonData === 'string' ? jsonData : (jsonData.result || JSON.stringify(jsonData));
+    if (text) {
+      const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
+      if (fameMatch) {
+        let name = cleanExtractedName(fameMatch[1]);
+        if (isRealName(name)) names.add(name);
+      }
+      
+      const numberedMatches = text.matchAll(/\d+\s*[-–—]\s*([^\d\n]+)/g);
+      for (const match of numberedMatches) {
+        let name = cleanExtractedName(match[1]);
+        if (isRealName(name)) names.add(name);
+      }
     }
-    
-    const numberedMatches = content.matchAll(/\d+\s*[-–—]\s*([^\d\n]+)/g);
-    for (const match of numberedMatches) {
-      let name = cleanExtractedName(match[1]);
-      if (isRealName(name)) names.add(name);
-    }
-  } catch {
-    const numberedMatches = text.matchAll(/(\d+)\s*[-–—]\s*([^\d\n<]+)/g);
-    for (const match of numberedMatches) {
-      let name = cleanExtractedName(match[2]);
-      if (isRealName(name)) names.add(name);
-    }
-  }
+  } catch (e) {}
+  return Array.from(names).slice(0, 200);
+}
 
+function extractNamesFromResponse(html) {
+  const names = new Set();
+  const numberedMatches = html.matchAll(/(\d+)\s*[-–—]\s*([^\d\n<]+)/g);
+  for (const match of numberedMatches) {
+    let name = cleanExtractedName(match[2]);
+    if (isRealName(name)) names.add(name);
+  }
   return Array.from(names).slice(0, 200);
 }
 
@@ -143,73 +111,41 @@ function detectProvider(cleanPhone) {
   return 'رقم دولي';
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 4000) {
+async function fetchWithTimeout(url, options = {}, signal, timeoutMs = 7000) {
   const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  if (signal) {
+    signal.addEventListener('abort', () => controller.abort());
+  }
+
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
-    clearTimeout(id);
+    clearTimeout(timeoutId);
     return response;
   } catch (error) {
-    clearTimeout(id);
+    clearTimeout(timeoutId);
     throw error;
   }
 }
 
-// ==========================================================
-// ⚡ دوال الجلب المتوازية والتدوير الذكي للمفاتيح
-// ==========================================================
-async function fetchDirectly(targetUrl, headers) {
-  const response = await fetchWithTimeout(targetUrl, { method: 'GET', headers }, 3500);
-  if (!response.ok) throw new Error('Direct Fetch Failed');
-  const text = await response.text();
-  const names = extractNamesFromText(text);
-  if (names.length === 0) throw new Error('No Names Found');
-  return { names, source: 'direct' };
-}
-
-async function fetchViaScraperWithFallback(targetUrl, headers) {
-  const activeKeys = SCRAPINGAPI_KEYS.filter(key => !DISABLED_KEYS.has(key));
-
-  if (activeKeys.length === 0) throw new Error('All Scraper API Keys Expired or Disabled');
-
-  for (const apiKey of activeKeys) {
-    try {
-      const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${apiKey}&url=${encodeURIComponent(targetUrl)}&render=false`;
-      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers }, 5000);
-      
-      // 1️⃣ التثبت من نفاد الرصيد المباشر (403 أو 401)
-      if (response.status === 403 || response.status === 401) {
-        const errorBody = await response.text();
-        if (errorBody.toLowerCase().includes('quota') || errorBody.toLowerCase().includes('exceeded') || response.status === 401) {
-          console.warn(`[ScraperAPI] Quota Exhausted for Key: ${apiKey.substring(0, 8)}... (Disabling)`);
-          DISABLED_KEYS.add(apiKey);
-        }
-        continue;
-      }
-
-      // 2️⃣ ضغط الطلبات المتزامنة (429) -> تجاوز للمرة الحالية فقط
-      if (response.status === 429) {
-        console.warn(`[ScraperAPI] Concurrency Limit Hit for Key: ${apiKey.substring(0, 8)}... (Skipping once)`);
-        continue;
-      }
-
-      // 3️⃣ استجابة ناجحة
-      if (response.ok) {
-        const text = await response.text();
-        const names = extractNamesFromText(text);
-        if (names.length > 0) return { names, source: 'scrapingapi' };
-      }
-    } catch (err) {
-      console.warn(`[ScraperAPI] Network/Timeout Error (${err.message}). Key remains active.`);
-    }
+// دالة مساعدة لتنفيذ الطلب واستخراج الأسماء مباشرة
+async function attemptFetch(url, options, timeoutMs, isJson = false) {
+  const res = await fetchWithTimeout(url, options, null, timeoutMs);
+  if (!res.ok) throw new Error('HTTP Error ' + res.status);
+  const text = await res.text();
+  
+  let names = [];
+  try {
+    names = extractNamesFromJSON(JSON.parse(text));
+  } catch {
+    names = extractNamesFromResponse(text);
   }
-  throw new Error('All ScraperAPI Keys Failed');
+  
+  if (names.length === 0) throw new Error('No names found');
+  return names;
 }
 
-// ==========================================================
-// 🚀 Endpoint الرئيسي
-// ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
     const query = req.method === 'GET' ? req.query.query : req.body.query;
@@ -242,28 +178,70 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       'accept': '*/*',
       'accept-language': 'ar,en;q=0.9',
       'referer': dynamicReferer,
-      'user-agent': getRandomUserAgent()
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
     };
 
-    let fetchResult;
+    let names = [];
+    let source = '';
+
+    // 🛡️ المرحلة الأولى: السباق السريع المتوازي
+    const abortController = new AbortController();
+    
+    const directTask = async () => {
+      const res = await fetchWithTimeout(targetUrl, { method: 'GET', headers: browserHeaders }, abortController.signal, 5000);
+      if (!res.ok) throw new Error('Failed');
+      const txt = await res.text();
+      let found = [];
+      try { found = extractNamesFromJSON(JSON.parse(txt)); } catch { found = extractNamesFromResponse(txt); }
+      if (found.length === 0) throw new Error('Empty');
+      return { names: found, source: 'direct' };
+    };
+
+    const scraperTask = async () => {
+      if (!SCRAPINGAPI_API_KEY) throw new Error('No Key');
+      const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
+      const res = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, abortController.signal, 8000);
+      if (!res.ok) throw new Error('Failed');
+      const txt = await res.text();
+      let found = [];
+      try { found = extractNamesFromJSON(JSON.parse(txt)); } catch { found = extractNamesFromResponse(txt); }
+      if (found.length === 0) throw new Error('Empty');
+      return { names: found, source: 'scrapingapi' };
+    };
 
     try {
-      fetchResult = await Promise.any([
-        fetchDirectly(targetUrl, browserHeaders),
-        fetchViaScraperWithFallback(targetUrl, browserHeaders)
-      ]);
+      const fastResult = await Promise.any([directTask(), scraperTask()]);
+      abortController.abort();
+      names = fastResult.names;
+      source = fastResult.source;
     } catch (e) {
-      // فشل المصدرين معاً
+      // 🛡️ المرحلة الثانية (المحاولة الإضافية لضمان عدم الضياع):
+      // إذا فشلت الحلول السريعة المتوازية، يجرب السيرفر المحاولات المتتالية بإعدادات أعمق
+
+      // 1. إعادة محاولة مباشرة بمهلة أكبر (8 ثوانٍ)
+      try {
+        names = await attemptFetch(targetUrl, { method: 'GET', headers: browserHeaders }, 8000);
+        source = 'direct_retry';
+      } catch (retryErr) {
+        // 2. إعادة محاولة عبر ScraperAPI مع تفعيل خيار حظر الكوكيز/الحصانة
+        if (SCRAPINGAPI_API_KEY) {
+          try {
+            const fallbackScraperUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&keep_headers=true`;
+            names = await attemptFetch(fallbackScraperUrl, { method: 'GET', headers: browserHeaders }, 12000);
+            source = 'scrapingapi_retry';
+          } catch (scraperErr) {}
+        }
+      }
     }
 
-    if (!fetchResult || !fetchResult.names || fetchResult.names.length === 0) {
+    if (names.length === 0) {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
     }
 
-    const results = fetchResult.names.map(name => ({
+    const results = names.map(name => ({
       name,
       phone: databasePhone,
-      source: fetchResult.source === 'scrapingapi' ? 'ScrapingAPI' : 'مباشر',
+      source: source.includes('scrapingapi') ? 'ScrapingAPI' : 'مباشر',
       provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
@@ -272,7 +250,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       success: true,
       results,
       total: results.length,
-      source: fetchResult.source,
+      source,
       cached_at: new Date().toISOString()
     };
 
