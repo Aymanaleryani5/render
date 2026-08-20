@@ -7,9 +7,6 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// دالة تأخير
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 // ==========================================================
 // 📊 نظام الكاش (Memory Cache)
 // ==========================================================
@@ -57,6 +54,9 @@ const cache = new MemoryCache();
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json());
+
+// Endpoint بسيط لإبقاء السيرفر مستيقظاً (Ping)
+app.get('/ping', (req, res) => res.status(200).send('OK'));
 
 // ==========================================================
 // 📝 دوال تنظيف واستخراج سريعة
@@ -123,7 +123,7 @@ function detectProvider(cleanPhone) {
   return 'رقم دولي';
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 6000) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -140,8 +140,6 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 6000) {
 // 🚀 Endpoint الرئيسي
 // ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
-  const startTime = Date.now();
-
   try {
     const query = req.method === 'GET' ? req.query.query : req.body.query;
 
@@ -161,12 +159,10 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = cache.match(cacheKey);
 
-    // ⚡ إرجاع مباشر وسريع جداً في حالة وجود الكاش (بدون أي تأخير)
     if (cachedData) {
       return res.status(200).set('X-Cache-Status', 'HIT').json(cachedData);
     }
 
-    // ⏳ إذا لم توجد في الكاش، نبدأ عملية الجلب من السيرفر الخارجي
     let names = [];
     let success = false;
     let source = '';
@@ -182,8 +178,9 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
     };
 
+    // المحاولة الأولى: طلب مباشر
     try {
-      const response = await fetchWithTimeout(targetUrl, { method: 'GET', headers: browserHeaders }, 3000);
+      const response = await fetchWithTimeout(targetUrl, { method: 'GET', headers: browserHeaders }, 3500);
       if (response.ok) {
         const responseText = await response.text();
         try {
@@ -199,6 +196,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       }
     } catch (e) {}
 
+    // المحاولة الثانية: عبر ScraperAPI إذا فشلت الأولى
     if (!success && SCRAPINGAPI_API_KEY) {
       try {
         const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
@@ -219,16 +217,10 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       } catch (e) {}
     }
 
-    // ⏱️ في حالة عدم وجود كاش (Cache Miss)، انتظر المتبقي حتى تكتمل 7 ثوانٍ بالضبط
-    const elapsedTime = Date.now() - startTime;
-    const remainingTime = Math.max(0, 7000 - elapsedTime);
-    await delay(remainingTime);
-
     if (!success || names.length === 0) {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
     }
 
-    // --- تجهيز النتائج وحفظها في الكاش للمرات القادمة ---
     const results = names.map(name => ({
       name,
       phone: databasePhone,
@@ -249,9 +241,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     return res.status(200).json(finalResponseData);
 
   } catch (e) {
-    const elapsedTime = Date.now() - startTime;
-    const remainingTime = Math.max(0, 7000 - elapsedTime);
-    await delay(remainingTime);
     return res.status(500).json({ success: false, results: [], total: 0, error: e.message });
   }
 });
