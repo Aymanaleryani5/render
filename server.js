@@ -8,11 +8,15 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ==========================================================
-// 📊 نظام الكاش (Memory Cache)
+// 📊 نظام الكاش (Memory Cache مع تنظيف تلقائي عند الامتلاء)
 // ==========================================================
 class MemoryCache {
-  constructor() {
-    this.cache = new NodeCache({ stdTTL: 2592000, checkperiod: 86400 });
+  constructor(maxKeys = 3000) {
+    this.maxKeys = maxKeys; // الحد الأقصى لعدد المفاتيح قبل مسح الكاش بالكامل
+    this.cache = new NodeCache({ 
+      stdTTL: 604800, // الاحتفاظ بالنتيجة لمدة أسبوع واحد لتوفير الذاكرة
+      checkperiod: 1800 // فحص البيانات المنتهية كل 30 دقيقة
+    });
   }
 
   match(requestKey) {
@@ -20,7 +24,16 @@ class MemoryCache {
   }
 
   put(requestKey, responseData) {
+    // تفريغ الكاش بالكامل تلقائياً عند الوصول للحد الأقصى للحفاظ على سرعة السيرفر
+    if (this.cache.stats.keys >= this.maxKeys) {
+      console.log('⚠️ وصل الكاش للحد الأقصى، يتم المسح الكامل لإعادة التعبئة...');
+      this.cache.flushAll();
+    }
     this.cache.set(requestKey, responseData);
+  }
+
+  flush() {
+    this.cache.flushAll();
   }
 }
 
@@ -50,13 +63,22 @@ const rateLimiter = rateLimit({
 });
 
 const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "26617cf864e88b0c2f85ccc8a55155dc";
-const cache = new MemoryCache();
+
+// تهيئة الكاش وبدء السيرفر بكاش فارغ تماماً فور التشغيل
+const cache = new MemoryCache(3000); 
+cache.flush();
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json());
 
-// Endpoint بسيط لإبقاء السيرفر مستيقظاً (Ping)
+// Endpoint فحص حالة السيرفر وإبقائه مستيقظاً (Ping)
 app.get('/ping', (req, res) => res.status(200).send('OK'));
+
+// Endpoint يدوي لتفريغ الكاش عند الحاجة
+app.get('/api/clear-cache', (req, res) => {
+  cache.flush();
+  return res.json({ success: true, message: 'تم مسح الكاش بالكامل بنجاح' });
+});
 
 // ==========================================================
 // 📝 دوال تنظيف واستخراج سريعة
@@ -123,7 +145,7 @@ function detectProvider(cleanPhone) {
   return 'رقم دولي';
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 3000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -137,7 +159,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
 }
 
 // ==========================================================
-// 🚀 Endpoint الرئيسي
+// 🚀 Endpoint الرئيسي للبحث
 // ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
@@ -159,6 +181,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = cache.match(cacheKey);
 
+    // إرجاع النتيجة فوراً إن وجدت في الكاش
     if (cachedData) {
       return res.status(200).set('X-Cache-Status', 'HIT').json(cachedData);
     }
@@ -178,9 +201,9 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
     };
 
-    // المحاولة الأولى: طلب مباشر
+    // المحاولة الأولى: طلب مباشر (مهلة 3 ثواني)
     try {
-      const response = await fetchWithTimeout(targetUrl, { method: 'GET', headers: browserHeaders }, 3500);
+      const response = await fetchWithTimeout(targetUrl, { method: 'GET', headers: browserHeaders }, 3000);
       if (response.ok) {
         const responseText = await response.text();
         try {
@@ -196,11 +219,11 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       }
     } catch (e) {}
 
-    // المحاولة الثانية: عبر ScraperAPI إذا فشلت الأولى
+    // المحاولة الثانية: عبر ScraperAPI عند فشل المباشر (مهلة 4.5 ثانية)
     if (!success && SCRAPINGAPI_API_KEY) {
       try {
         const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
-        const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 5000);
+        const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 4500);
         
         if (response.ok) {
           const responseContent = await response.text();
@@ -237,6 +260,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       cached_at: new Date().toISOString()
     };
 
+    // حفظ في الكاش وإرجاع النتيجة فوراً
     cache.put(cacheKey, finalResponseData);
     return res.status(200).json(finalResponseData);
 
