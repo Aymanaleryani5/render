@@ -7,6 +7,9 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// دالة تأخير
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // ==========================================================
 // 📊 نظام الكاش (Memory Cache)
 // ==========================================================
@@ -120,7 +123,7 @@ function detectProvider(cleanPhone) {
   return 'رقم دولي';
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 2000) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 6000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -137,6 +140,8 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 2000) {
 // 🚀 Endpoint الرئيسي
 // ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
+  const startTime = Date.now();
+
   try {
     const query = req.method === 'GET' ? req.query.query : req.body.query;
 
@@ -155,10 +160,13 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = cache.match(cacheKey);
+
+    // ⚡ إرجاع مباشر وسريع جداً في حالة وجود الكاش (بدون أي تأخير)
     if (cachedData) {
       return res.status(200).set('X-Cache-Status', 'HIT').json(cachedData);
     }
 
+    // ⏳ إذا لم توجد في الكاش، نبدأ عملية الجلب من السيرفر الخارجي
     let names = [];
     let success = false;
     let source = '';
@@ -175,7 +183,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     };
 
     try {
-      const response = await fetchWithTimeout(targetUrl, { method: 'GET', headers: browserHeaders }, 2000);
+      const response = await fetchWithTimeout(targetUrl, { method: 'GET', headers: browserHeaders }, 3000);
       if (response.ok) {
         const responseText = await response.text();
         try {
@@ -194,7 +202,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     if (!success && SCRAPINGAPI_API_KEY) {
       try {
         const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
-        const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 4000);
+        const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 5000);
         
         if (response.ok) {
           const responseContent = await response.text();
@@ -211,15 +219,19 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       } catch (e) {}
     }
 
+    // ⏱️ في حالة عدم وجود كاش (Cache Miss)، انتظر المتبقي حتى تكتمل 7 ثوانٍ بالضبط
+    const elapsedTime = Date.now() - startTime;
+    const remainingTime = Math.max(0, 7000 - elapsedTime);
+    await delay(remainingTime);
+
     if (!success || names.length === 0) {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
     }
 
-    // --- تجهيز النتائج مع ربط حقول الرقم المتوقعة في التطبيق ---
+    // --- تجهيز النتائج وحفظها في الكاش للمرات القادمة ---
     const results = names.map(name => ({
       name,
       phone: databasePhone,
-      number: databasePhone,
       source: source === 'scrapingapi' ? 'ScrapingAPI' : 'مباشر',
       provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
@@ -237,6 +249,9 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     return res.status(200).json(finalResponseData);
 
   } catch (e) {
+    const elapsedTime = Date.now() - startTime;
+    const remainingTime = Math.max(0, 7000 - elapsedTime);
+    await delay(remainingTime);
     return res.status(500).json({ success: false, results: [], total: 0, error: e.message });
   }
 });
