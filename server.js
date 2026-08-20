@@ -215,10 +215,11 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
     }
 
-    // --- تجهيز النتائج مع استخدام phone فقط ---
+    // --- تجهيز النتائج مع ربط حقول الرقم المتوقعة في التطبيق ---
     const results = names.map(name => ({
       name,
       phone: databasePhone,
+      number: databasePhone,
       source: source === 'scrapingapi' ? 'ScrapingAPI' : 'مباشر',
       provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
