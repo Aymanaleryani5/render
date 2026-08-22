@@ -232,55 +232,30 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
     };
 
-    // ✅ نشغّل المحاولة المباشرة و ScraperAPI بالتوازي بدل التسلسل، ونأخذ أول نتيجة ناجحة
-    // هذا يخفض وقت الاستجابة من (3.5 + 5 = 8.5 ثانية كحد أقصى) إلى (5 ثواني كحد أقصى)
-    const attempts = [];
-
-    attempts.push(
-      fetchWithTimeout(targetUrl, { method: 'GET', headers: browserHeaders }, 3500)
-        .then(async (response) => {
-          if (!response.ok) return null;
-          const responseText = await response.text();
-          let extracted;
-          try {
-            extracted = extractNamesFromJSON(JSON.parse(responseText));
-          } catch {
-            extracted = extractNamesFromResponse(responseText);
-          }
-          return extracted.length > 0 ? { names: extracted, source: 'direct' } : null;
-        })
-        .catch(() => null)
-    );
-
-    if (SCRAPINGAPI_API_KEY) {
-      const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
-      attempts.push(
-        fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 5000)
-          .then(async (response) => {
-            if (!response.ok) return null;
-            const responseContent = await response.text();
-            let extracted;
-            try {
-              extracted = extractNamesFromJSON(JSON.parse(responseContent));
-            } catch {
-              extracted = extractNamesFromResponse(responseContent);
-            }
-            return extracted.length > 0 ? { names: extracted, source: 'scrapingapi' } : null;
-          })
-          .catch(() => null)
-      );
+    // ✅ الطلب فقط عبر ScraperAPI (تم إلغاء المحاولة المباشرة)
+    if (!SCRAPINGAPI_API_KEY) {
+      return res.status(200).json({ success: false, results: [], total: 0, error: 'مفتاح ScraperAPI غير مضبوط' });
     }
 
-    const settled = await Promise.all(attempts);
-    // نفضّل نتيجة "direct" لو نجحت، وإلا نأخذ أول نتيجة ناجحة من ScraperAPI
-    const directHit = settled.find((r) => r && r.source === 'direct');
-    const anyHit = directHit || settled.find((r) => r !== null);
+    const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
 
-    if (anyHit) {
-      names = anyHit.names;
-      success = true;
-      source = anyHit.source;
-    }
+    try {
+      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 5000);
+      if (response.ok) {
+        const responseContent = await response.text();
+        let extracted;
+        try {
+          extracted = extractNamesFromJSON(JSON.parse(responseContent));
+        } catch {
+          extracted = extractNamesFromResponse(responseContent);
+        }
+        if (extracted.length > 0) {
+          names = extracted;
+          success = true;
+          source = 'scrapingapi';
+        }
+      }
+    } catch (e) {}
 
     if (!success || names.length === 0) {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
@@ -289,7 +264,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const results = names.map(name => ({
       name,
       phone: databasePhone,
-      source: source === 'scrapingapi' ? 'ScrapingAPI' : 'مباشر',
+      source: 'ScrapingAPI',
       provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
