@@ -12,8 +12,6 @@ const PORT = process.env.PORT || 3000;
 // ==========================================================
 class MemoryCache {
   constructor() {
-    // stdTTL: 86400 (يوم واحد بالثواني)
-    // checkperiod: 3600 (التحقق كل ساعة لتنظيف الذاكرة)
     this.cache = new NodeCache({ stdTTL: 86400, checkperiod: 3600 });
   }
 
@@ -149,10 +147,9 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'البحث فارغ' });
     }
 
-    let cleanPhone = query.trim().replace(/[\s\-\(\)\+]/g, '');
-    if (cleanPhone.startsWith('00')) cleanPhone = cleanPhone.substring(2);
-    else if (cleanPhone.startsWith('0')) cleanPhone = cleanPhone.substring(1);
-    if (cleanPhone.startsWith('967')) cleanPhone = cleanPhone.substring(3);
+    // 🔧 تنظيف حاسم: استخراج الأرقام فقط وتصفيتها لأخر 9 أرقام (مثل 730475639)
+    const digitsOnly = String(query).replace(/\D/g, '');
+    let cleanPhone = digitsOnly.length >= 9 ? digitsOnly.slice(-9) : digitsOnly;
 
     const provider = detectProvider(cleanPhone);
     let databasePhone = (provider !== 'رقم دولي' && !cleanPhone.startsWith('0')) ? '0' + cleanPhone : cleanPhone;
