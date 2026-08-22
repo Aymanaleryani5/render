@@ -38,7 +38,7 @@ const rateLimiter = rateLimit({
     message: '⏳ يرجى الانتظار 3 ثواني بين عمليات البحث'
   }),
   keyGenerator: (req) => {
-    return req.headers['cf-connecting-ip'] || 
+    return req.headers['cf-connecting-ip'] ||
            req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
            req.ip ||
            'anonymous';
@@ -85,8 +85,8 @@ const COUNTRY_CODES = [
 ];
 
 const STOP_WORDS = new Set([
-  'صحيح', 'صحيحة', 'خطأ', 'نعم', 'لا', 'بحث', 'نتائج', 'البحث', 'للرقم', 
-  'اسم', 'الشهرة', 'السجلات', 'المكتشفة', 'الأكثر', 'شيوعاً', 'شيوعا', 'اليمن', 
+  'صحيح', 'صحيحة', 'خطأ', 'نعم', 'لا', 'بحث', 'نتائج', 'البحث', 'للرقم',
+  'اسم', 'الشهرة', 'السجلات', 'المكتشفة', 'الأكثر', 'شيوعاً', 'شيوعا', 'اليمن',
   'سجل', 'تفاصيل', 'بيانات', 'عفواً', 'تأكيد', 'الرقم', 'يرجى', 'الانتظار',
   'null', 'undefined', 'info', 'country', 'search', 'phone', 'true', 'false'
 ]);
@@ -117,7 +117,7 @@ function extractNamesFromJSON(jsonData) {
         let name = cleanExtractedName(fameMatch[1]);
         if (isRealName(name)) names.add(name);
       }
-      
+
       const numberedMatches = text.matchAll(/\d+\s*[-–—]\s*([^\d\n]+)/g);
       for (const match of numberedMatches) {
         let name = cleanExtractedName(match[1]);
@@ -232,43 +232,54 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
     };
 
-    // المحاولة الأولى: طلب مباشر
-    try {
-      const response = await fetchWithTimeout(targetUrl, { method: 'GET', headers: browserHeaders }, 3500);
-      if (response.ok) {
-        const responseText = await response.text();
-        try {
-          const jsonData = JSON.parse(responseText);
-          names = extractNamesFromJSON(jsonData);
-        } catch {
-          names = extractNamesFromResponse(responseText);
-        }
-        if (names.length > 0) {
-          success = true;
-          source = 'direct';
-        }
-      }
-    } catch (e) {}
+    // ✅ نشغّل المحاولة المباشرة و ScraperAPI بالتوازي بدل التسلسل، ونأخذ أول نتيجة ناجحة
+    // هذا يخفض وقت الاستجابة من (3.5 + 5 = 8.5 ثانية كحد أقصى) إلى (5 ثواني كحد أقصى)
+    const attempts = [];
 
-    // المحاولة الثانية: عبر ScraperAPI
-    if (!success && SCRAPINGAPI_API_KEY) {
-      try {
-        const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
-        const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 5000);
-        
-        if (response.ok) {
-          const responseContent = await response.text();
+    attempts.push(
+      fetchWithTimeout(targetUrl, { method: 'GET', headers: browserHeaders }, 3500)
+        .then(async (response) => {
+          if (!response.ok) return null;
+          const responseText = await response.text();
+          let extracted;
           try {
-            names = extractNamesFromJSON(JSON.parse(responseContent));
+            extracted = extractNamesFromJSON(JSON.parse(responseText));
           } catch {
-            names = extractNamesFromResponse(responseContent);
+            extracted = extractNamesFromResponse(responseText);
           }
-          if (names.length > 0) {
-            success = true;
-            source = 'scrapingapi';
-          }
-        }
-      } catch (e) {}
+          return extracted.length > 0 ? { names: extracted, source: 'direct' } : null;
+        })
+        .catch(() => null)
+    );
+
+    if (SCRAPINGAPI_API_KEY) {
+      const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
+      attempts.push(
+        fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 5000)
+          .then(async (response) => {
+            if (!response.ok) return null;
+            const responseContent = await response.text();
+            let extracted;
+            try {
+              extracted = extractNamesFromJSON(JSON.parse(responseContent));
+            } catch {
+              extracted = extractNamesFromResponse(responseContent);
+            }
+            return extracted.length > 0 ? { names: extracted, source: 'scrapingapi' } : null;
+          })
+          .catch(() => null)
+      );
+    }
+
+    const settled = await Promise.all(attempts);
+    // نفضّل نتيجة "direct" لو نجحت، وإلا نأخذ أول نتيجة ناجحة من ScraperAPI
+    const directHit = settled.find((r) => r && r.source === 'direct');
+    const anyHit = directHit || settled.find((r) => r !== null);
+
+    if (anyHit) {
+      names = anyHit.names;
+      success = true;
+      source = anyHit.source;
     }
 
     if (!success || names.length === 0) {
@@ -302,16 +313,26 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 // ==========================================================
 // ⏰ آلية إبقاء السيرفر نشطاً (Self-Ping Interval) كل 5 دقائق
 // ==========================================================
-const SERVER_URL = process.env.RENDER_EXTERNAL_URL || 'https://render-9ujf.onrender.com';
+// ✅ الإصلاح الأهم: Render يضبط RENDER_EXTERNAL_URL تلقائياً بالرابط الصحيح لهذا
+// السيرفر بالذات. القيمة الاحتياطية القديمة كانت رابط سيرفر مختلف تماماً
+// (render-9ujf بدل render-1-s1ut)، فكان الـ ping يذهب لمكان خاطئ وهذا
+// السيرفر يظل ينام فعلياً (Cold Start) رغم وجود كود keep-alive.
+// تأكد من ضبط متغير البيئة SERVER_SELF_URL بالرابط الصحيح لهذا السيرفر
+// من Render Dashboard -> Environment كحل احتياطي إضافي.
+const SERVER_URL = process.env.RENDER_EXTERNAL_URL || process.env.SERVER_SELF_URL;
 
-setInterval(async () => {
-  try {
-    await fetch(`${SERVER_URL}/ping`);
-    console.log('⏰ Keep-alive ping sent successfully');
-  } catch (err) {
-    console.error('⚠️ Keep-alive ping failed:', err.message);
-  }
-}, 5 * 60 * 1000); // 5 دقائق
+if (SERVER_URL) {
+  setInterval(async () => {
+    try {
+      await fetch(`${SERVER_URL}/ping`);
+      console.log('⏰ Keep-alive ping sent successfully to', SERVER_URL);
+    } catch (err) {
+      console.error('⚠️ Keep-alive ping failed:', err.message);
+    }
+  }, 5 * 60 * 1000); // 5 دقائق
+} else {
+  console.warn('⚠️ لم يتم ضبط RENDER_EXTERNAL_URL أو SERVER_SELF_URL - آلية keep-alive معطّلة، السيرفر سينام بعد فترة خمول (خطة Render المجانية).');
+}
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
