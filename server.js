@@ -8,11 +8,11 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ==========================================================
-// 📊 نظام الكاش (Memory Cache) - مدة الكاش 1 يوم
+// 📊 نظام الكاش (Memory Cache) - مدة الكاش والفحص 2 يوم (48 ساعة)
 // ==========================================================
 class MemoryCache {
   constructor() {
-    this.cache = new NodeCache({ stdTTL: 86400, checkperiod: 3600 });
+    this.cache = new NodeCache({ stdTTL: 172800, checkperiod: 172800 });
   }
 
   match(requestKey) {
@@ -58,7 +58,7 @@ app.use(express.json());
 app.get('/ping', (req, res) => res.status(200).send('OK'));
 
 // ==========================================================
-// 🌍 خريطة مفاتيح دول العالم (مفاتيح الاتصال الدولية)
+// 🌍 خريطة مفاتيح دول العالم
 // ==========================================================
 const COUNTRY_CODES = [
   { code: '967', country: 'اليمن' },
@@ -79,63 +79,11 @@ const COUNTRY_CODES = [
   { code: '216', country: 'تونس' },
   { code: '218', country: 'ليبيا' },
   { code: '249', country: 'السودان' },
-  { code: '252', country: 'الصومال' },
-  { code: '253', country: 'جيبوتي' },
-  { code: '222', country: 'موريتانيا' },
-  { code: '269', country: 'جزر القمر' },
   { code: '1', country: 'أمريكا / كندا' },
-  { code: '44', country: 'المملكة المتحدة (بريطانيا)' },
-  { code: '33', country: 'فرنسا' },
-  { code: '49', country: 'ألمانيا' },
-  { code: '39', country: 'إيطاليا' },
-  { code: '34', country: 'إسبانيا' },
-  { code: '7', country: 'روسيا / كازاخستان' },
-  { code: '86', country: 'الصين' },
-  { code: '91', country: 'الهند' },
-  { code: '92', country: 'باكستان' },
-  { code: '90', country: 'تركيا' },
-  { code: '98', country: 'إيران' },
-  { code: '90', country: 'تركيا' },
-  { code: '60', country: 'ماليزيا' },
-  { code: '62', country: 'إندونيسيا' },
-  { code: '63', country: 'الفلبين' },
-  { code: '880', country: 'بنغلاديش' },
-  { code: '234', country: 'نيجيريا' },
-  { code: '27', country: 'جنوب إفريقيا' },
-  { code: '55', country: 'البرازيل' },
-  { code: '52', country: 'المكسيك' },
-  { code: '54', country: 'الأرجنتين' },
-  { code: '61', country: 'أستراليا' },
-  { code: '64', country: 'نيوزيلندا' },
-  { code: '81', country: 'اليابان' },
-  { code: '82', country: 'كوريا الجنوبية' },
-  { code: '31', country: 'هولندا' },
-  { code: '32', country: 'بلجيكا' },
-  { code: '41', country: 'سويسرا' },
-  { code: '46', country: 'السويد' },
-  { code: '47', country: 'النرويج' },
-  { code: '45', country: 'الدنمارك' },
-  { code: '358', country: 'فنلندا' },
-  { code: '48', country: 'بولندا' },
-  { code: '43', country: 'النمسا' },
-  { code: '30', country: 'اليونان' },
-  { code: '351', country: 'البرتغال' },
-  { code: '380', country: 'أوكرانيا' },
-  { code: '420', country: 'التشيك' },
-  { code: '36', country: 'المجر' },
-  { code: '40', country: 'رومانيا' },
-  { code: '353', country: 'أيرلندا' },
-  { code: '66', country: 'تايلاند' },
-  { code: '84', country: 'فيتنام' },
-  { code: '65', country: 'سنغافورة' },
-  { code: '94', country: 'سريلانكا' },
-  { code: '977', country: 'نيبال' },
-  { code: '960', country: 'المالديف' }
+  { code: '44', country: 'بريطانيا' },
+  { code: '90', country: 'تركيا' }
 ];
 
-// ==========================================================
-// 📝 دوال التمييز والتنظيف
-// ==========================================================
 const STOP_WORDS = new Set([
   'صحيح', 'صحيحة', 'خطأ', 'نعم', 'لا', 'بحث', 'نتائج', 'البحث', 'للرقم', 
   'اسم', 'الشهرة', 'السجلات', 'المكتشفة', 'الأكثر', 'شيوعاً', 'شيوعا', 'اليمن', 
@@ -190,7 +138,6 @@ function extractNamesFromResponse(html) {
   return Array.from(names).slice(0, 200);
 }
 
-// دالة التعرف على الدولة أو المزود
 function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   if (cleanPhoneYemen) {
     if (/^(77|78)[0-9]{7}$/.test(cleanPhoneYemen)) return 'يمن موبايل';
@@ -200,7 +147,6 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
     return 'اليمن';
   }
 
-  // البحث في قائمة الدول
   for (const item of COUNTRY_CODES) {
     if (fullPhone.startsWith(item.code)) {
       return item.country;
@@ -234,7 +180,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'البحث فارغ' });
     }
 
-    let rawDigits = String(query).replace(/\D/g, ''); // استخراج الأرقام فقط
+    let rawDigits = String(query).replace(/\D/g, '');
 
     if (rawDigits.startsWith('00')) {
       rawDigits = rawDigits.substring(2);
@@ -244,26 +190,24 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     let databasePhone = '';
     let scrapePhone = '';
 
-    // معالجة الأرقام اليمنية والدولية
     if (rawDigits.startsWith('967')) {
       const cleanYemen = rawDigits.slice(-9);
       provider = detectProviderAndCountry(rawDigits, cleanYemen);
       databasePhone = '0' + cleanYemen;
-      scrapePhone = '+967' + cleanYemen;
+      scrapePhone = '967' + cleanYemen;
     } else if (rawDigits.length === 9 && /^(77|78|73|71|70)/.test(rawDigits)) {
       provider = detectProviderAndCountry('', rawDigits);
       databasePhone = '0' + rawDigits;
-      scrapePhone = '+967' + rawDigits;
+      scrapePhone = '967' + rawDigits;
     } else if (rawDigits.length === 10 && rawDigits.startsWith('07')) {
       const cleanYemen = rawDigits.substring(1);
       provider = detectProviderAndCountry('', cleanYemen);
       databasePhone = rawDigits;
-      scrapePhone = '+967' + cleanYemen;
+      scrapePhone = '967' + cleanYemen;
     } else {
-      // 🌍 رقم دولي (أي دولة في العالم)
       provider = detectProviderAndCountry(rawDigits, null);
       databasePhone = '+' + rawDigits;
-      scrapePhone = '+' + rawDigits;
+      scrapePhone = rawDigits;
     }
 
     const cacheKey = `phone_${databasePhone}`;
@@ -279,7 +223,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
     const base64Phone = Buffer.from(scrapePhone).toString('base64');
     const dynamicReferer = `https://ab.new9plus.com/calle/?res_id=K${base64Phone}%3D%3D`;
-    const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${encodeURIComponent(scrapePhone)}&nocache=${Date.now()}`;
+    const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}&nocache=${Date.now()}`;
 
     const browserHeaders = {
       'accept': '*/*',
@@ -354,6 +298,20 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     return res.status(500).json({ success: false, results: [], total: 0, error: e.message });
   }
 });
+
+// ==========================================================
+// ⏰ آلية إبقاء السيرفر نشطاً (Self-Ping Interval) كل 5 دقائق
+// ==========================================================
+const SERVER_URL = process.env.RENDER_EXTERNAL_URL || 'https://render-9ujf.onrender.com';
+
+setInterval(async () => {
+  try {
+    await fetch(`${SERVER_URL}/ping`);
+    console.log('⏰ Keep-alive ping sent successfully');
+  } catch (err) {
+    console.error('⚠️ Keep-alive ping failed:', err.message);
+  }
+}, 5 * 60 * 1000); // 5 دقائق
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
