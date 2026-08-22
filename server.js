@@ -28,8 +28,8 @@ class MemoryCache {
 // 📊 نظام تحديد المعدل (Rate Limiting)
 // ==========================================================
 const rateLimiter = rateLimit({
-  windowMs: 3 * 1000, // 3 ثواني
-  max: 1, // طلب واحد لكل IP
+  windowMs: 3 * 1000,
+  max: 1,
   message: JSON.stringify({
     success: false,
     results: [],
@@ -55,11 +55,86 @@ const cache = new MemoryCache();
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json());
 
-// Endpoint بسيط لإبقاء السيرفر مستيقظاً (Ping)
 app.get('/ping', (req, res) => res.status(200).send('OK'));
 
 // ==========================================================
-// 📝 دوال تنظيف واستخراج سريعة
+// 🌍 خريطة مفاتيح دول العالم (مفاتيح الاتصال الدولية)
+// ==========================================================
+const COUNTRY_CODES = [
+  { code: '967', country: 'اليمن' },
+  { code: '966', country: 'السعودية' },
+  { code: '20', country: 'مصر' },
+  { code: '971', country: 'الإمارات' },
+  { code: '965', country: 'الكويت' },
+  { code: '968', country: 'عُمان' },
+  { code: '974', country: 'قطر' },
+  { code: '973', country: 'البحرين' },
+  { code: '962', country: 'الأردن' },
+  { code: '961', country: 'لبنان' },
+  { code: '963', country: 'سوريا' },
+  { code: '964', country: 'العراق' },
+  { code: '970', country: 'فلسطين' },
+  { code: '212', country: 'المغرب' },
+  { code: '213', country: 'الجزائر' },
+  { code: '216', country: 'تونس' },
+  { code: '218', country: 'ليبيا' },
+  { code: '249', country: 'السودان' },
+  { code: '252', country: 'الصومال' },
+  { code: '253', country: 'جيبوتي' },
+  { code: '222', country: 'موريتانيا' },
+  { code: '269', country: 'جزر القمر' },
+  { code: '1', country: 'أمريكا / كندا' },
+  { code: '44', country: 'المملكة المتحدة (بريطانيا)' },
+  { code: '33', country: 'فرنسا' },
+  { code: '49', country: 'ألمانيا' },
+  { code: '39', country: 'إيطاليا' },
+  { code: '34', country: 'إسبانيا' },
+  { code: '7', country: 'روسيا / كازاخستان' },
+  { code: '86', country: 'الصين' },
+  { code: '91', country: 'الهند' },
+  { code: '92', country: 'باكستان' },
+  { code: '90', country: 'تركيا' },
+  { code: '98', country: 'إيران' },
+  { code: '90', country: 'تركيا' },
+  { code: '60', country: 'ماليزيا' },
+  { code: '62', country: 'إندونيسيا' },
+  { code: '63', country: 'الفلبين' },
+  { code: '880', country: 'بنغلاديش' },
+  { code: '234', country: 'نيجيريا' },
+  { code: '27', country: 'جنوب إفريقيا' },
+  { code: '55', country: 'البرازيل' },
+  { code: '52', country: 'المكسيك' },
+  { code: '54', country: 'الأرجنتين' },
+  { code: '61', country: 'أستراليا' },
+  { code: '64', country: 'نيوزيلندا' },
+  { code: '81', country: 'اليابان' },
+  { code: '82', country: 'كوريا الجنوبية' },
+  { code: '31', country: 'هولندا' },
+  { code: '32', country: 'بلجيكا' },
+  { code: '41', country: 'سويسرا' },
+  { code: '46', country: 'السويد' },
+  { code: '47', country: 'النرويج' },
+  { code: '45', country: 'الدنمارك' },
+  { code: '358', country: 'فنلندا' },
+  { code: '48', country: 'بولندا' },
+  { code: '43', country: 'النمسا' },
+  { code: '30', country: 'اليونان' },
+  { code: '351', country: 'البرتغال' },
+  { code: '380', country: 'أوكرانيا' },
+  { code: '420', country: 'التشيك' },
+  { code: '36', country: 'المجر' },
+  { code: '40', country: 'رومانيا' },
+  { code: '353', country: 'أيرلندا' },
+  { code: '66', country: 'تايلاند' },
+  { code: '84', country: 'فيتنام' },
+  { code: '65', country: 'سنغافورة' },
+  { code: '94', country: 'سريلانكا' },
+  { code: '977', country: 'نيبال' },
+  { code: '960', country: 'المالديف' }
+];
+
+// ==========================================================
+// 📝 دوال التمييز والتنظيف
 // ==========================================================
 const STOP_WORDS = new Set([
   'صحيح', 'صحيحة', 'خطأ', 'نعم', 'لا', 'بحث', 'نتائج', 'البحث', 'للرقم', 
@@ -115,11 +190,23 @@ function extractNamesFromResponse(html) {
   return Array.from(names).slice(0, 200);
 }
 
-function detectProvider(cleanPhone) {
-  if (/^(77|78)[0-9]{7}$/.test(cleanPhone)) return 'يمن موبايل';
-  if (/^(73)[0-9]{7}$/.test(cleanPhone)) return 'YOU';
-  if (/^(71)[0-9]{7}$/.test(cleanPhone)) return 'سبأفون';
-  if (/^(70)[0-9]{7}$/.test(cleanPhone)) return 'واي';
+// دالة التعرف على الدولة أو المزود
+function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
+  if (cleanPhoneYemen) {
+    if (/^(77|78)[0-9]{7}$/.test(cleanPhoneYemen)) return 'يمن موبايل';
+    if (/^(73)[0-9]{7}$/.test(cleanPhoneYemen)) return 'YOU';
+    if (/^(71)[0-9]{7}$/.test(cleanPhoneYemen)) return 'سبأفون';
+    if (/^(70)[0-9]{7}$/.test(cleanPhoneYemen)) return 'واي';
+    return 'اليمن';
+  }
+
+  // البحث في قائمة الدول
+  for (const item of COUNTRY_CODES) {
+    if (fullPhone.startsWith(item.code)) {
+      return item.country;
+    }
+  }
+
   return 'رقم دولي';
 }
 
@@ -147,13 +234,37 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'البحث فارغ' });
     }
 
-    // 🔧 تنظيف حاسم: استخراج الأرقام فقط وتصفيتها لأخر 9 أرقام (مثل 730475639)
-    const digitsOnly = String(query).replace(/\D/g, '');
-    let cleanPhone = digitsOnly.length >= 9 ? digitsOnly.slice(-9) : digitsOnly;
+    let rawDigits = String(query).replace(/\D/g, ''); // استخراج الأرقام فقط
 
-    const provider = detectProvider(cleanPhone);
-    let databasePhone = (provider !== 'رقم دولي' && !cleanPhone.startsWith('0')) ? '0' + cleanPhone : cleanPhone;
-    const scrapePhone = provider !== 'رقم دولي' ? '+967' + cleanPhone : '+' + cleanPhone;
+    if (rawDigits.startsWith('00')) {
+      rawDigits = rawDigits.substring(2);
+    }
+
+    let provider = '';
+    let databasePhone = '';
+    let scrapePhone = '';
+
+    // معالجة الأرقام اليمنية والدولية
+    if (rawDigits.startsWith('967')) {
+      const cleanYemen = rawDigits.slice(-9);
+      provider = detectProviderAndCountry(rawDigits, cleanYemen);
+      databasePhone = '0' + cleanYemen;
+      scrapePhone = '+967' + cleanYemen;
+    } else if (rawDigits.length === 9 && /^(77|78|73|71|70)/.test(rawDigits)) {
+      provider = detectProviderAndCountry('', rawDigits);
+      databasePhone = '0' + rawDigits;
+      scrapePhone = '+967' + rawDigits;
+    } else if (rawDigits.length === 10 && rawDigits.startsWith('07')) {
+      const cleanYemen = rawDigits.substring(1);
+      provider = detectProviderAndCountry('', cleanYemen);
+      databasePhone = rawDigits;
+      scrapePhone = '+967' + cleanYemen;
+    } else {
+      // 🌍 رقم دولي (أي دولة في العالم)
+      provider = detectProviderAndCountry(rawDigits, null);
+      databasePhone = '+' + rawDigits;
+      scrapePhone = '+' + rawDigits;
+    }
 
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = cache.match(cacheKey);
@@ -195,7 +306,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       }
     } catch (e) {}
 
-    // المحاولة الثانية: عبر ScraperAPI إذا فشلت الأولى
+    // المحاولة الثانية: عبر ScraperAPI
     if (!success && SCRAPINGAPI_API_KEY) {
       try {
         const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
