@@ -156,7 +156,8 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
+// ⏱️ الـ Timeout الافتراضي أصبح 7 ثوانٍ (7000ms)
+async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -232,7 +233,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
     };
 
-    // ✅ الطلب فقط عبر ScraperAPI (تم إلغاء المحاولة المباشرة)
     if (!SCRAPINGAPI_API_KEY) {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'مفتاح ScraperAPI غير مضبوط' });
     }
@@ -240,7 +240,8 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
 
     try {
-      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 5000);
+      // ⏱️ استدعاء بمهلة 7000ms (7 ثوانٍ)
+      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 7000);
       if (response.ok) {
         const responseContent = await response.text();
         let extracted;
@@ -288,12 +289,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 // ==========================================================
 // ⏰ آلية إبقاء السيرفر نشطاً (Self-Ping Interval) كل 5 دقائق
 // ==========================================================
-// ✅ الإصلاح الأهم: Render يضبط RENDER_EXTERNAL_URL تلقائياً بالرابط الصحيح لهذا
-// السيرفر بالذات. القيمة الاحتياطية القديمة كانت رابط سيرفر مختلف تماماً
-// (render-9ujf بدل render-1-s1ut)، فكان الـ ping يذهب لمكان خاطئ وهذا
-// السيرفر يظل ينام فعلياً (Cold Start) رغم وجود كود keep-alive.
-// تأكد من ضبط متغير البيئة SERVER_SELF_URL بالرابط الصحيح لهذا السيرفر
-// من Render Dashboard -> Environment كحل احتياطي إضافي.
 const SERVER_URL = process.env.RENDER_EXTERNAL_URL || process.env.SERVER_SELF_URL;
 
 if (SERVER_URL) {
@@ -304,7 +299,7 @@ if (SERVER_URL) {
     } catch (err) {
       console.error('⚠️ Keep-alive ping failed:', err.message);
     }
-  }, 5 * 60 * 1000); // 5 دقائق
+  }, 5 * 60 * 1000);
 } else {
   console.warn('⚠️ لم يتم ضبط RENDER_EXTERNAL_URL أو SERVER_SELF_URL - آلية keep-alive معطّلة، السيرفر سينام بعد فترة خمول (خطة Render المجانية).');
 }
