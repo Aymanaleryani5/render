@@ -156,7 +156,7 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
-// ⏱️ الـ Timeout الافتراضي أصبح 7 ثوانٍ (7000ms)
+// ⏱️ الـ Timeout الافتراضي 7 ثوانٍ (7000ms)
 async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -240,7 +240,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
 
     try {
-      // ⏱️ استدعاء بمهلة 7000ms (7 ثوانٍ)
       const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 7000);
       if (response.ok) {
         const responseContent = await response.text();
@@ -285,24 +284,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     return res.status(500).json({ success: false, results: [], total: 0, error: e.message });
   }
 });
-
-// ==========================================================
-// ⏰ آلية إبقاء السيرفر نشطاً (Self-Ping Interval) كل 5 دقائق
-// ==========================================================
-const SERVER_URL = process.env.RENDER_EXTERNAL_URL || process.env.SERVER_SELF_URL;
-
-if (SERVER_URL) {
-  setInterval(async () => {
-    try {
-      await fetch(`${SERVER_URL}/ping`);
-      console.log('⏰ Keep-alive ping sent successfully to', SERVER_URL);
-    } catch (err) {
-      console.error('⚠️ Keep-alive ping failed:', err.message);
-    }
-  }, 5 * 60 * 1000);
-} else {
-  console.warn('⚠️ لم يتم ضبط RENDER_EXTERNAL_URL أو SERVER_SELF_URL - آلية keep-alive معطّلة، السيرفر سينام بعد فترة خمول (خطة Render المجانية).');
-}
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
