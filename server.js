@@ -15,18 +15,29 @@ app.all('/api/search', async (req, res) => {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'البحث فارغ' });
     }
 
-    // 🚀 الجلب المباشر من سيرفر Vercel وتفادي أي خطأ في مسار /api/search
-    const vercelResponse = await fetch(`https://prox-alpha-one.vercel.app/?query=${encodeURIComponent(query)}`);
-    
+    // 🚀 الاتصال بالمسار الجديد المعتمد داخل مجلد api في Vercel
+    const vercelUrl = `https://prox-alpha-one.vercel.app/api/search?query=${encodeURIComponent(query)}`;
+    const vercelResponse = await fetch(vercelUrl);
+
     if (!vercelResponse.ok) {
-      return res.status(200).json({ success: false, results: [], total: 0, error: `فشل السيرفر المعالج: ${vercelResponse.status}` });
+      return res.status(200).json({ 
+        success: false, 
+        results: [], 
+        total: 0, 
+        error: `خطأ من سيرفر Vercel - رمز الاستجابة: ${vercelResponse.status}` 
+      });
     }
 
     const data = await vercelResponse.json();
     return res.status(200).json(data);
 
   } catch (error) {
-    return res.status(500).json({ success: false, results: [], total: 0, error: error.message });
+    return res.status(500).json({ 
+      success: false, 
+      results: [], 
+      total: 0, 
+      error: `فشل معالجة البيانات: ${error.message}` 
+    });
   }
 });
 
