@@ -7,22 +7,23 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// 🚀 توجيه الطلبات إلى Vercel مباشرة بدون مسار /api/search
-app.all('/api/search', (req, res) => {
+app.all('/api/search', async (req, res) => {
   const query = req.method === 'GET' ? req.query.query : req.body.query;
   
   if (!query) {
     return res.status(200).json({ success: false, results: [], total: 0, error: 'البحث فارغ' });
   }
 
-  // التوجيه إلى رابط Vercel الرئيسي المباشر
-  const vercelUrl = `https://prox-alpha-one.vercel.app/?query=${encodeURIComponent(query)}`;
-  
-  return res.redirect(307, vercelUrl);
+  try {
+    // جلب البيانات من Vercel مباشرة دون عمل Redirect للتطبيق
+    const vercelResponse = await fetch(`https://prox-alpha-one.vercel.app/api/search?query=${encodeURIComponent(query)}`);
+    const data = await vercelResponse.json();
+    return res.status(200).json(data);
+  } catch (error) {
+    return res.status(500).json({ success: false, results: [], total: 0, error: 'فشل الجلب من سيرفر المعالجة' });
+  }
 });
 
-app.get('/ping', (req, res) => res.status(200).send('OK'));
-
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Redirect server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
