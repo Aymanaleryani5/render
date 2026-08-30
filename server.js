@@ -46,7 +46,6 @@ const rateLimiter = rateLimit({
 const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "1432f28f4c66602b7020a6f1bf5fd9ba";
 const cache = new MemoryCache();
 
-// السماح بجميع ترويسات الطلبات الممكنة من تطبيقات الموبايل
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -172,38 +171,33 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
 // ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
-    // قراءة البيانات سواءً أُرسلت عبر Query أو Body
-    const query = req.query.query || req.body.query || req.query.phone || req.body.phone;
+    const originalQuery = req.query.query || req.body.query || req.query.phone || req.body.phone;
 
-    if (!query) {
+    if (!originalQuery) {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'البحث فارغ' });
     }
 
-    // 1. تنظيف المدخلات تماماً واستخراج الأرقام فقط
-    let rawDigits = String(query).replace(/\D/g, '');
+    // تنظيف المدخلات لاستخراج الرقم الأصلي للتفتيش
+    let rawDigits = String(originalQuery).replace(/\D/g, '');
 
     let provider = '';
-    let databasePhone = '';
     let scrapePhone = '';
 
-    // 2. البحث عن آخر 9 أرقام تبدأ بـ (77, 78, 73, 71, 70) لتصحيح التكرار المزدوج
+    // البحث عن 9 أرقام يمنية تبدأ بـ 7
     const yemenMatch = rawDigits.match(/(7[01378]\d{7})$/);
 
     if (yemenMatch) {
       const cleanYemen = yemenMatch[1];
       provider = detectProviderAndCountry('967' + cleanYemen, cleanYemen);
-      databasePhone = '0' + cleanYemen;
       scrapePhone = '967' + cleanYemen;
     } else {
-      // التعامل مع الحالات الأخرى أو الأرقام الدولية
       if (rawDigits.startsWith('00')) rawDigits = rawDigits.substring(2);
-      
       provider = detectProviderAndCountry(rawDigits, null);
-      databasePhone = '+' + rawDigits;
       scrapePhone = rawDigits;
     }
 
-    const cacheKey = `phone_${databasePhone}`;
+    // كاش مبني على الاستعلام الإجمالي لمنع التكرار
+    const cacheKey = `phone_${scrapePhone}`;
     const cachedData = cache.match(cacheKey);
 
     if (cachedData) {
@@ -253,9 +247,11 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
     }
 
+    // إرجاع نفس المدخل ليفهمه التطبيق بجميع الأشكال
     const results = names.map(name => ({
       name,
-      phone: databasePhone,
+      phone: String(originalQuery).trim(), 
+      raw_phone: scrapePhone,
       source: 'ScrapingAPI',
       provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
