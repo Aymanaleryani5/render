@@ -49,7 +49,7 @@ const rateLimiter = rateLimit({
   }
 });
 
-// مفتاح ScrapingBee الذي قمت بتزويدي به
+// مفتاح ScrapingBee الخاص بك
 const SCRAPINGBEE_API_KEY = "VE09LYYXN90PY3FRV8O6FDU1U2WWAUX6K4KUMIGPFOMXV1GFS8ZD0UXAGPN52SCRQI0OU5I7BAEXHTVH";
 const cache = new MemoryCache();
 
@@ -79,7 +79,8 @@ const STOP_WORDS = new Set([
   'صحيح', 'صحيحة', 'خطأ', 'نعم', 'لا', 'بحث', 'نتائج', 'البحث', 'للرقم',
   'اسم', 'الشهرة', 'السجلات', 'المكتشفة', 'الأكثر', 'شيوعاً', 'شيوعا', 'اليمن',
   'سجل', 'تفاصيل', 'بيانات', 'عفواً', 'تأكيد', 'الرقم', 'يرجى', 'الانتظار',
-  'null', 'undefined', 'info', 'country', 'search', 'phone', 'true', 'false'
+  'null', 'undefined', 'info', 'country', 'search', 'phone', 'true', 'false',
+  'لقد', 'استنفدت', 'رصيد', 'المجاني', 'اكتشاف', 'المزيد', 'يرجى', 'الانتظار'
 ]);
 
 function isRealName(name) {
@@ -93,7 +94,7 @@ function cleanExtractedName(name) {
   if (!name) return '';
   return name
     .replace(/عدد\s*السجلات\s*المكتشفة|هذا\s*الاسم\s*هو\s*الأكثر\s*شيوعاً\s*لهذا\s*الرقم|نتائج\s*البحث\s*للرقم|[\\{}{}\[\]"':\-_,\/|\.]/gi, ' ')
-    .replace(/\b(عدد|السجلات|المكتشفة|الأكثر|شيوعا|شيوعاً|لهذا|الرقم|يرجى|الانتظار|البحث|نتائج|اسم|الشهرة|هاتف|ثابت)\b/gi, '')
+    .replace(/\b(عدد|السجلات|المكتشفة|الأكثر|شيوعا|شيوعاً|لهذا|الرقم|يرجى|الانتظار|البحث|نتائج|اسم|الشهرة|هاتف|ثابت|استنفدت|رصيد)\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -103,6 +104,9 @@ function extractNamesFromJSON(jsonData) {
   try {
     const text = typeof jsonData === 'string' ? jsonData : (jsonData.result || JSON.stringify(jsonData));
     if (text) {
+      // التحقق مما إذا كانت الرسالة هي رسالة حظر الرصيد لتجنب اعتبارها اسماً
+      if (text.includes('استنفدت رصيد')) return [];
+
       const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
       if (fameMatch) {
         let name = cleanExtractedName(fameMatch[1]);
@@ -121,6 +125,8 @@ function extractNamesFromJSON(jsonData) {
 
 function extractNamesFromResponse(html) {
   const names = new Set();
+  if (html.includes('استنفدت رصيد')) return [];
+
   const numberedMatches = html.matchAll(/(\d+)\s*[-–—]\s*([^\d\n<]+)/g);
   for (const match of numberedMatches) {
     let name = cleanExtractedName(match[2]);
@@ -215,8 +221,8 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const dynamicReferer = `https://ab.new9plus.com/calle/?res_id=K${base64Phone}%3D%3D`;
     const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}&nocache=${Date.now()}`;
 
-    // رابط ScrapingBee مع تفعيل التخفي والبروكسيات السكنية لتغيير الـ IP في كل طلب وتجاوز الحماية
-    const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(targetUrl)}&stealth_proxy=true&premium_proxy=true`;
+    // إعداد رابط ScrapingBee مع تفعيل التخفي، والبروكسيات السكنية، وتحديد دولة (مثل السعودية sa) وحظر الإعلانات لتجاوز الحظر
+    const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(targetUrl)}&stealth_proxy=true&premium_proxy=true&country_code=sa&block_ads=true`;
 
     const scrapingBeeHeaders = {
       'Spb-Referer': dynamicReferer
@@ -243,7 +249,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     }
 
     if (!success || names.length === 0) {
-      return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
+      return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج أو تم استنفاد الرصيد المؤقت للموقع' });
     }
 
     const results = names.map(name => ({
