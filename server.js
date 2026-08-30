@@ -7,6 +7,9 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ==========================================================
+// 📊 نظام الكاش (Memory Cache) - مدة الكاش والفحص 2 يوم (48 ساعة)
+// ==========================================================
 class MemoryCache {
   constructor() {
     this.cache = new NodeCache({ stdTTL: 172800, checkperiod: 172800 });
@@ -21,6 +24,9 @@ class MemoryCache {
   }
 }
 
+// ==========================================================
+// 📊 نظام تحديد المعدل (Rate Limiting)
+// ==========================================================
 const rateLimiter = rateLimit({
   windowMs: 3 * 1000,
   max: 1,
@@ -43,20 +49,17 @@ const rateLimiter = rateLimit({
   }
 });
 
-const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "26617cf864e88b0c2f85ccc8a55155dc";
+const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "1432f28f4c66602b7020a6f1bf5fd9ba";
 const cache = new MemoryCache();
 
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
-}));
-
+app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 app.get('/ping', (req, res) => res.status(200).send('OK'));
 
+// ==========================================================
+// 🌍 خريطة مفاتيح دول العالم
+// ==========================================================
 const COUNTRY_CODES = [
   { code: '967', country: 'اليمن' },
   { code: '966', country: 'السعودية' },
@@ -153,6 +156,7 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
+// ⏱️ الـ Timeout الافتراضي 7 ثوانٍ (7000ms)
 async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -166,37 +170,48 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
   }
 }
 
+// ==========================================================
+// 🚀 Endpoint الرئيسي
+// ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
-    // قبول الطلب باسم query أو phone من GET أو POST
-    const originalQuery = req.query.query || req.body.query || req.query.phone || req.body.phone;
+    const query = req.method === 'GET' ? req.query.query : req.body.query;
 
-    if (!originalQuery) {
+    if (!query) {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'البحث فارغ' });
     }
 
-    let rawDigits = String(originalQuery).replace(/\D/g, '');
+    let rawDigits = String(query).replace(/\D/g, '');
+
+    if (rawDigits.startsWith('00')) {
+      rawDigits = rawDigits.substring(2);
+    }
 
     let provider = '';
+    let databasePhone = '';
     let scrapePhone = '';
 
-    // استخراج آخر 9 أرقام يمنية لتجاوز التكرار المزدوج للمفاتيح
-    const yemenMatch = rawDigits.match(/(7[01378]\d{7})$/);
-
-    if (yemenMatch) {
-      const cleanYemen = yemenMatch[1];
-      provider = detectProviderAndCountry('967' + cleanYemen, cleanYemen);
+    if (rawDigits.startsWith('967')) {
+      const cleanYemen = rawDigits.slice(-9);
+      provider = detectProviderAndCountry(rawDigits, cleanYemen);
+      databasePhone = '0' + cleanYemen;
+      scrapePhone = '967' + cleanYemen;
+    } else if (rawDigits.length === 9 && /^(77|78|73|71|70)/.test(rawDigits)) {
+      provider = detectProviderAndCountry('', rawDigits);
+      databasePhone = '0' + rawDigits;
+      scrapePhone = '967' + rawDigits;
+    } else if (rawDigits.length === 10 && rawDigits.startsWith('07')) {
+      const cleanYemen = rawDigits.substring(1);
+      provider = detectProviderAndCountry('', cleanYemen);
+      databasePhone = rawDigits;
       scrapePhone = '967' + cleanYemen;
     } else {
-      if (rawDigits.startsWith('00')) rawDigits = rawDigits.substring(2);
       provider = detectProviderAndCountry(rawDigits, null);
+      databasePhone = '+' + rawDigits;
       scrapePhone = rawDigits;
     }
 
-    // تنظيف مؤكد للموقع الخارجي (أرقام فقط بدون %)
-    const cleanScrapePhone = String(scrapePhone).replace(/\D/g, '');
-
-    const cacheKey = `phone_${cleanScrapePhone}`;
+    const cacheKey = `phone_${databasePhone}`;
     const cachedData = cache.match(cacheKey);
 
     if (cachedData) {
@@ -207,10 +222,9 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     let success = false;
     let source = '';
 
-    const base64Phone = Buffer.from(cleanScrapePhone).toString('base64');
+    const base64Phone = Buffer.from(scrapePhone).toString('base64');
     const dynamicReferer = `https://ab.new9plus.com/calle/?res_id=K${base64Phone}%3D%3D`;
-    
-    const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${cleanScrapePhone}&nocache=${Date.now()}`;
+    const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}&nocache=${Date.now()}`;
 
     const browserHeaders = {
       'accept': '*/*',
@@ -247,11 +261,9 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
     }
 
-    // مطابقة النص المسترجع مع المدخل الأصلي للتطبيق
     const results = names.map(name => ({
       name,
-      phone: String(originalQuery).trim(), 
-      raw_phone: cleanScrapePhone,
+      phone: databasePhone,
       source: 'ScrapingAPI',
       provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
@@ -272,17 +284,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     return res.status(500).json({ success: false, results: [], total: 0, error: e.message });
   }
 });
-
-const SERVER_URL = process.env.RENDER_EXTERNAL_URL || 'https://render-9ujf.onrender.com';
-
-setInterval(async () => {
-  try {
-    await fetch(`${SERVER_URL}/ping`);
-    console.log('⏰ Keep-alive ping sent successfully');
-  } catch (err) {
-    console.error('⚠️ Keep-alive ping failed:', err.message);
-  }
-}, 5 * 60 * 1000);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
