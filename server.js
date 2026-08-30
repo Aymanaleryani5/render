@@ -171,19 +171,20 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
 // ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
+    // قراءة البيانات بأي شكل يرسله التطبيق
     const originalQuery = req.query.query || req.body.query || req.query.phone || req.body.phone;
 
     if (!originalQuery) {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'البحث فارغ' });
     }
 
-    // تنظيف المدخلات لاستخراج الرقم الأصلي للتفتيش
+    // استخراج الأرقام فقط للتفتيش
     let rawDigits = String(originalQuery).replace(/\D/g, '');
 
     let provider = '';
     let scrapePhone = '';
 
-    // البحث عن 9 أرقام يمنية تبدأ بـ 7
+    // اقتطاع آخر 9 أرقام يمنية تبدأ بـ 7 لتجاوز تكرار المفاتيح
     const yemenMatch = rawDigits.match(/(7[01378]\d{7})$/);
 
     if (yemenMatch) {
@@ -196,7 +197,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       scrapePhone = rawDigits;
     }
 
-    // كاش مبني على الاستعلام الإجمالي لمنع التكرار
     const cacheKey = `phone_${scrapePhone}`;
     const cachedData = cache.match(cacheKey);
 
@@ -247,7 +247,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
     }
 
-    // إرجاع نفس المدخل ليفهمه التطبيق بجميع الأشكال
+    // مطابقة استجابة الهاتف مع النص الأصلي ليتعرف عليه التطبيق
     const results = names.map(name => ({
       name,
       phone: String(originalQuery).trim(), 
