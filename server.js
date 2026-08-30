@@ -52,7 +52,12 @@ const rateLimiter = rateLimit({
 const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "1432f28f4c66602b7020a6f1bf5fd9ba";
 const cache = new MemoryCache();
 
-app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
+// إعدادات CORS مرنة لتجنب الحظر في التطبيقات
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
 app.use(express.json());
 
 app.get('/ping', (req, res) => res.status(200).send('OK'));
@@ -181,8 +186,15 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'البحث فارغ' });
     }
 
+    // 1. تنظيف الإدخال واستخراج الأرقام فقط
     let rawDigits = String(query).replace(/\D/g, '');
 
+    // 2. إصلاح تكرار رمز الدولة (مثل 967967777778193 القادم من التطبيقات)
+    if (rawDigits.startsWith('967967')) {
+      rawDigits = rawDigits.substring(3);
+    }
+
+    // 3. إزالة الصفرين الدوليين 00
     if (rawDigits.startsWith('00')) {
       rawDigits = rawDigits.substring(2);
     }
@@ -191,19 +203,13 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     let databasePhone = '';
     let scrapePhone = '';
 
-    if (rawDigits.startsWith('967')) {
-      const cleanYemen = rawDigits.slice(-9);
-      provider = detectProviderAndCountry(rawDigits, cleanYemen);
+    // 4. استخراج واستكمال الرقم اليمني الذكي
+    const yemenMatch = rawDigits.match(/(7[01378]\d{7})$/);
+
+    if (yemenMatch || rawDigits.startsWith('967')) {
+      const cleanYemen = yemenMatch ? yemenMatch[1] : rawDigits.slice(-9);
+      provider = detectProviderAndCountry('967' + cleanYemen, cleanYemen);
       databasePhone = '0' + cleanYemen;
-      scrapePhone = '967' + cleanYemen;
-    } else if (rawDigits.length === 9 && /^(77|78|73|71|70)/.test(rawDigits)) {
-      provider = detectProviderAndCountry('', rawDigits);
-      databasePhone = '0' + rawDigits;
-      scrapePhone = '967' + rawDigits;
-    } else if (rawDigits.length === 10 && rawDigits.startsWith('07')) {
-      const cleanYemen = rawDigits.substring(1);
-      provider = detectProviderAndCountry('', cleanYemen);
-      databasePhone = rawDigits;
       scrapePhone = '967' + cleanYemen;
     } else {
       provider = detectProviderAndCountry(rawDigits, null);
