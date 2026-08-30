@@ -7,9 +7,6 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ==========================================================
-// 📊 نظام الكاش (Memory Cache) - مدة الكاش والفحص 2 يوم (48 ساعة)
-// ==========================================================
 class MemoryCache {
   constructor() {
     this.cache = new NodeCache({ stdTTL: 172800, checkperiod: 172800 });
@@ -24,9 +21,6 @@ class MemoryCache {
   }
 }
 
-// ==========================================================
-// 📊 نظام تحديد المعدل (Rate Limiting)
-// ==========================================================
 const rateLimiter = rateLimit({
   windowMs: 3 * 1000,
   max: 1,
@@ -52,19 +46,18 @@ const rateLimiter = rateLimit({
 const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "1432f28f4c66602b7020a6f1bf5fd9ba";
 const cache = new MemoryCache();
 
-// إعدادات CORS مرنة لتجنب الحظر في التطبيقات
+// السماح بجميع ترويسات الطلبات الممكنة من تطبيقات الموبايل
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
+
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 app.get('/ping', (req, res) => res.status(200).send('OK'));
 
-// ==========================================================
-// 🌍 خريطة مفاتيح دول العالم
-// ==========================================================
 const COUNTRY_CODES = [
   { code: '967', country: 'اليمن' },
   { code: '966', country: 'السعودية' },
@@ -161,7 +154,6 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
-// ⏱️ الـ Timeout الافتراضي 7 ثوانٍ (7000ms)
 async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -180,38 +172,32 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
 // ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
-    const query = req.method === 'GET' ? req.query.query : req.body.query;
+    // قراءة البيانات سواءً أُرسلت عبر Query أو Body
+    const query = req.query.query || req.body.query || req.query.phone || req.body.phone;
 
     if (!query) {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'البحث فارغ' });
     }
 
-    // 1. تنظيف الإدخال واستخراج الأرقام فقط
+    // 1. تنظيف المدخلات تماماً واستخراج الأرقام فقط
     let rawDigits = String(query).replace(/\D/g, '');
-
-    // 2. إصلاح تكرار رمز الدولة (مثل 967967777778193 القادم من التطبيقات)
-    if (rawDigits.startsWith('967967')) {
-      rawDigits = rawDigits.substring(3);
-    }
-
-    // 3. إزالة الصفرين الدوليين 00
-    if (rawDigits.startsWith('00')) {
-      rawDigits = rawDigits.substring(2);
-    }
 
     let provider = '';
     let databasePhone = '';
     let scrapePhone = '';
 
-    // 4. استخراج واستكمال الرقم اليمني الذكي
+    // 2. البحث عن آخر 9 أرقام تبدأ بـ (77, 78, 73, 71, 70) لتصحيح التكرار المزدوج
     const yemenMatch = rawDigits.match(/(7[01378]\d{7})$/);
 
-    if (yemenMatch || rawDigits.startsWith('967')) {
-      const cleanYemen = yemenMatch ? yemenMatch[1] : rawDigits.slice(-9);
+    if (yemenMatch) {
+      const cleanYemen = yemenMatch[1];
       provider = detectProviderAndCountry('967' + cleanYemen, cleanYemen);
       databasePhone = '0' + cleanYemen;
       scrapePhone = '967' + cleanYemen;
     } else {
+      // التعامل مع الحالات الأخرى أو الأرقام الدولية
+      if (rawDigits.startsWith('00')) rawDigits = rawDigits.substring(2);
+      
       provider = detectProviderAndCountry(rawDigits, null);
       databasePhone = '+' + rawDigits;
       scrapePhone = rawDigits;
