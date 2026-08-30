@@ -49,7 +49,8 @@ const rateLimiter = rateLimit({
   }
 });
 
-const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "1432f28f4c66602b7020a6f1bf5fd9ba";
+// مفتاح ScrapingBee الذي قمت بتزويدي به
+const SCRAPINGBEE_API_KEY = "VE09LYYXN90PY3FRV8O6FDU1U2WWAUX6K4KUMIGPFOMXV1GFS8ZD0UXAGPN52SCRQI0OU5I7BAEXHTVH";
 const cache = new MemoryCache();
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
@@ -61,26 +62,16 @@ app.get('/ping', (req, res) => res.status(200).send('OK'));
 // 🌍 خريطة مفاتيح دول العالم
 // ==========================================================
 const COUNTRY_CODES = [
-  { code: '967', country: 'اليمن' },
-  { code: '966', country: 'السعودية' },
-  { code: '20', country: 'مصر' },
-  { code: '971', country: 'الإمارات' },
-  { code: '965', country: 'الكويت' },
-  { code: '968', country: 'عُمان' },
-  { code: '974', country: 'قطر' },
-  { code: '973', country: 'البحرين' },
-  { code: '962', country: 'الأردن' },
-  { code: '961', country: 'لبنان' },
-  { code: '963', country: 'سوريا' },
-  { code: '964', country: 'العراق' },
-  { code: '970', country: 'فلسطين' },
-  { code: '212', country: 'المغرب' },
-  { code: '213', country: 'الجزائر' },
-  { code: '216', country: 'تونس' },
-  { code: '218', country: 'ليبيا' },
-  { code: '249', country: 'السودان' },
-  { code: '1', country: 'أمريكا / كندا' },
-  { code: '44', country: 'بريطانيا' },
+  { code: '967', country: 'اليمن' }, { code: '966', country: 'السعودية' },
+  { code: '20', country: 'مصر' }, { code: '971', country: 'الإمارات' },
+  { code: '965', country: 'الكويت' }, { code: '968', country: 'عُمان' },
+  { code: '974', country: 'قطر' }, { code: '973', country: 'البحرين' },
+  { code: '962', country: 'الأردن' }, { code: '961', country: 'لبنان' },
+  { code: '963', country: 'سوريا' }, { code: '964', country: 'العراق' },
+  { code: '970', country: 'فلسطين' }, { code: '212', country: 'المغرب' },
+  { code: '213', country: 'الجزائر' }, { code: '216', country: 'تونس' },
+  { code: '218', country: 'ليبيا' }, { code: '249', country: 'السودان' },
+  { code: '1', country: 'أمريكا / كندا' }, { code: '44', country: 'بريطانيا' },
   { code: '90', country: 'تركيا' }
 ];
 
@@ -146,18 +137,16 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
     if (/^(70)[0-9]{7}$/.test(cleanPhoneYemen)) return 'واي';
     return 'اليمن';
   }
-
   for (const item of COUNTRY_CODES) {
     if (fullPhone.startsWith(item.code)) {
       return item.country;
     }
   }
-
   return 'رقم دولي';
 }
 
-// ⏱️ الـ Timeout الافتراضي 7 ثوانٍ (7000ms)
-async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
+// ⏱️ الـ Timeout 15 ثانية للتأكد من نجاح وضع التخفي
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -226,21 +215,15 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const dynamicReferer = `https://ab.new9plus.com/calle/?res_id=K${base64Phone}%3D%3D`;
     const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}&nocache=${Date.now()}`;
 
-    const browserHeaders = {
-      'accept': '*/*',
-      'accept-language': 'ar,en;q=0.9',
-      'referer': dynamicReferer,
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
+    // رابط ScrapingBee مع تفعيل التخفي والبروكسيات السكنية لتغيير الـ IP في كل طلب وتجاوز الحماية
+    const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(targetUrl)}&stealth_proxy=true&premium_proxy=true`;
+
+    const scrapingBeeHeaders = {
+      'Spb-Referer': dynamicReferer
     };
 
-    if (!SCRAPINGAPI_API_KEY) {
-      return res.status(200).json({ success: false, results: [], total: 0, error: 'مفتاح ScraperAPI غير مضبوط' });
-    }
-
-    const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
-
     try {
-      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 7000);
+      const response = await fetchWithTimeout(scrapingBeeUrl, { method: 'GET', headers: scrapingBeeHeaders }, 15000);
       if (response.ok) {
         const responseContent = await response.text();
         let extracted;
@@ -252,10 +235,12 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         if (extracted.length > 0) {
           names = extracted;
           success = true;
-          source = 'scrapingapi';
+          source = 'ScrapingBee';
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("Scraping Error:", e.message);
+    }
 
     if (!success || names.length === 0) {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
@@ -264,7 +249,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const results = names.map(name => ({
       name,
       phone: databasePhone,
-      source: 'ScrapingAPI',
+      source: 'ScrapingBee',
       provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
