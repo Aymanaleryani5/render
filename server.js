@@ -166,25 +166,19 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
   }
 }
 
-// ==========================================================
-// 🚀 Endpoint الرئيسي
-// ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
-    // قراءة البيانات بأي شكل يرسله التطبيق
     const originalQuery = req.query.query || req.body.query || req.query.phone || req.body.phone;
 
     if (!originalQuery) {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'البحث فارغ' });
     }
 
-    // استخراج الأرقام فقط للتفتيش
     let rawDigits = String(originalQuery).replace(/\D/g, '');
 
     let provider = '';
     let scrapePhone = '';
 
-    // اقتطاع آخر 9 أرقام يمنية تبدأ بـ 7 لتجاوز تكرار المفاتيح
     const yemenMatch = rawDigits.match(/(7[01378]\d{7})$/);
 
     if (yemenMatch) {
@@ -197,7 +191,10 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       scrapePhone = rawDigits;
     }
 
-    const cacheKey = `phone_${scrapePhone}`;
+    // تنظيف مؤكد للموقع الخارجي (أرقام فقط بدون %)
+    const cleanScrapePhone = String(scrapePhone).replace(/\D/g, '');
+
+    const cacheKey = `phone_${cleanScrapePhone}`;
     const cachedData = cache.match(cacheKey);
 
     if (cachedData) {
@@ -208,9 +205,11 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     let success = false;
     let source = '';
 
-    const base64Phone = Buffer.from(scrapePhone).toString('base64');
+    const base64Phone = Buffer.from(cleanScrapePhone).toString('base64');
     const dynamicReferer = `https://ab.new9plus.com/calle/?res_id=K${base64Phone}%3D%3D`;
-    const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}&nocache=${Date.now()}`;
+    
+    // بناء رابط نظيف للموقع الخارجي
+    const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${cleanScrapePhone}&nocache=${Date.now()}`;
 
     const browserHeaders = {
       'accept': '*/*',
@@ -247,11 +246,10 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
     }
 
-    // مطابقة استجابة الهاتف مع النص الأصلي ليتعرف عليه التطبيق
     const results = names.map(name => ({
       name,
       phone: String(originalQuery).trim(), 
-      raw_phone: scrapePhone,
+      raw_phone: cleanScrapePhone,
       source: 'ScrapingAPI',
       provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
