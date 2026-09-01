@@ -4,41 +4,74 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 🔗 رابط Vercel المستهدف
-const VERCEL_DOMAIN = 'https://prox-pj6lsspd3-yemenphoneplus.vercel.app';
+// 🔑 مفتاح ScrapingAPI الخاص بك
+const SCRAPING_API_KEY = '1432f28f4c66602b7020a6f1bf5fd9ba';
+const SCRAPING_API_URL = 'https://api.scrapingapi.com';
+
+// 🔗 الرابط المستهدف الذي تريد جلب البيانات منه
+const TARGET_DOMAIN = 'https://prox-pj6lsspd3-yemenphoneplus.vercel.app';
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json());
 
-// 🚀 جلب البيانات من Vercel وتمريرها مباشرة إلى الفلاتر دون تغيير الرابط على التطبيق
+// 🚀 جلب البيانات عبر ScrapingAPI ثم تمريرها إلى الفلاتر
 app.all('*', async (req, res) => {
   try {
-    const targetUrl = `${VERCEL_DOMAIN}${req.originalUrl}`;
+    // بناء الرابط الكامل للموقع المستهدف
+    const targetUrl = `${TARGET_DOMAIN}${req.originalUrl}`;
+    
+    // إعداد بارامترات ScrapingAPI
+    const params = new URLSearchParams({
+      api_key: SCRAPING_API_KEY,
+      url: targetUrl,
+      render: 'true', // لتشغيل JavaScript إذا كان الموقع يستخدمه
+      wait: '2000', // انتظار تحميل الصفحة
+      country_code: 'us', // تغيير حسب الحاجة
+      device_type: 'desktop' // أو 'mobile'
+    });
 
-    // إعداد الخيارات لتطبيق طلب GET أو POST حسب ما أرسله الفلاتر
-    const fetchOptions = {
-      method: req.method,
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'User-Agent': req.headers['user-agent'] || 'Flutter-App'
-      }
-    };
-
-    // تمرير بيانات Body إذا كان الطلب POST أو PUT
-    if (['POST', 'PUT', 'PATCH'].includes(req.method) && Object.keys(req.body || {}).length > 0) {
-      fetchOptions.body = JSON.stringify(req.body);
+    // إضافة البارامترات حسب نوع الطلب
+    if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+      // لطلبات POST، نمرر البيانات كـ query parameters
+      params.append('post_data', JSON.stringify(req.body || {}));
+      params.append('method', req.method.toLowerCase());
     }
 
-    // إرسال الطلب إلى Vercel من خادم Render
-    const response = await fetch(targetUrl, fetchOptions);
+    // إضافة headers مخصصة إذا لزم الأمر
+    if (req.headers['user-agent']) {
+      params.append('custom_headers', JSON.stringify({
+        'User-Agent': req.headers['user-agent']
+      }));
+    }
+
+    // إرسال الطلب إلى ScrapingAPI
+    const scrapingUrl = `${SCRAPING_API_URL}?${params.toString()}`;
+    console.log(`📡 جلب البيانات من: ${targetUrl} عبر ScrapingAPI`);
+
+    const response = await fetch(scrapingUrl, {
+      method: 'GET', // ScrapingAPI يستخدم GET دائماً مع بارامترات
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+    });
+
     const data = await response.text();
 
-    // إرجاع النتيجة للتطبيق مع الحفاظ على نوع المحتوى (JSON)
-    res.setHeader('Content-Type', response.headers.get('content-type') || 'application/json; charset=utf-8');
-    return res.status(response.status).send(data);
+    // محاولة تحويل البيانات إلى JSON للتحقق من صحتها
+    try {
+      const jsonData = JSON.parse(data);
+      // إرجاع البيانات مع تنسيق JSON
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      return res.status(response.status).json(jsonData);
+    } catch (e) {
+      // إذا لم تكن البيانات JSON، نعيدها كنص
+      res.setHeader('Content-Type', response.headers.get('content-type') || 'text/plain; charset=utf-8');
+      return res.status(response.status).send(data);
+    }
 
   } catch (error) {
+    console.error('❌ خطأ في الاتصال بـ ScrapingAPI:', error.message);
     return res.status(500).json({
       success: false,
       results: [],
@@ -49,5 +82,7 @@ app.all('*', async (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Render Reverse Proxy running on port ${PORT}`);
+  console.log(`🚀 Render Proxy with ScrapingAPI running on port ${PORT}`);
+  console.log(`🔑 ScrapingAPI Key: ${SCRAPING_API_KEY.substring(0, 8)}...`);
+  console.log(`🎯 Target: ${TARGET_DOMAIN}`);
 });
