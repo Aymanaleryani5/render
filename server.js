@@ -2,18 +2,10 @@ const express = require('express');
 const cors = require('cors');
 const NodeCache = require('node-cache');
 const rateLimit = require('express-rate-limit');
+require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// ==========================================================
-// 🚀 تحسينات Render
-// ==========================================================
-app.set('trust proxy', true);
-app.use((req, res, next) => {
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  next();
-});
 
 // ==========================================================
 // 📊 نظام الكاش (Memory Cache) - مدة الكاش والفحص 2 يوم (48 ساعة)
@@ -29,21 +21,6 @@ class MemoryCache {
 
   put(requestKey, responseData) {
     this.cache.set(requestKey, responseData);
-  }
-
-  // لإحصائيات الكاش
-  getStats() {
-    return {
-      keys: this.cache.keys(),
-      size: this.cache.getStats().keys,
-      hits: this.cache.getStats().hits,
-      misses: this.cache.getStats().misses
-    };
-  }
-
-  flushAll() {
-    this.cache.flushAll();
-    console.log('🧹 Cache cleared');
   }
 }
 
@@ -72,26 +49,13 @@ const rateLimiter = rateLimit({
   }
 });
 
-const SCRAPINGAPI_API_KEY = "1432f28f4c66602b7020a6f1bf5fd9ba";
+const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "1432f28f4c66602b7020a6f1bf5fd9ba";
 const cache = new MemoryCache();
-
-// تنظيف الكاش عند بدء التشغيل على Render
-cache.flushAll();
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json());
 
-// ==========================================================
-// 🏓 Endpoint للـ Health Check
-// ==========================================================
 app.get('/ping', (req, res) => res.status(200).send('OK'));
-
-// ==========================================================
-// 📊 Endpoint لإحصائيات الكاش
-// ==========================================================
-app.get('/cache-stats', (req, res) => {
-  res.json(cache.getStats());
-});
 
 // ==========================================================
 // 🌍 خريطة مفاتيح دول العالم
@@ -192,8 +156,8 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
-// ⏱️ الـ Timeout 5 ثوانٍ (5000ms) بدلاً من 7
-async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
+// ⏱️ الـ Timeout الافتراضي 7 ثوانٍ (7000ms)
+async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -276,7 +240,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
 
     try {
-      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 5000);
+      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 7000);
       if (response.ok) {
         const responseContent = await response.text();
         let extracted;
@@ -323,6 +287,4 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🏓 Health check: /ping`);
-  console.log(`📊 Cache stats: /cache-stats`);
 });
