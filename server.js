@@ -3,7 +3,7 @@ const cors = require('cors');
 const NodeCache = require('node-cache');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
-
+ 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -52,15 +52,8 @@ const rateLimiter = rateLimit({
 const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "1432f28f4c66602b7020a6f1bf5fd9ba";
 const cache = new MemoryCache();
 
-// إعدادات الـ CORS لتتوافق تماماً مع طلبات Dio (Flutter)
-app.use(cors({ 
-  origin: '*', 
-  methods: ['GET', 'POST', 'OPTIONS'], 
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'] 
-}));
-
+app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 app.get('/ping', (req, res) => res.status(200).send('OK'));
 
@@ -178,15 +171,11 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
 }
 
 // ==========================================================
-// 🚀 Endpoint الرئيسي (يدعم GET و POST لطلبات Dio)
+// 🚀 Endpoint الرئيسي
 // ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
-  // ضبط نوع المحتوى للرد كـ JSON مع ترميز UTF-8 لدعم اللغة العربية بشكل كامل
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-
   try {
-    // دعم استقبال المعلمات سواء كانت عبر Query Parameters أو Body (مفيد جداً مع Dio في Flutter)
-    const query = req.method === 'GET' ? req.query.query : (req.body?.query || req.query.query);
+    const query = req.method === 'GET' ? req.query.query : req.body.query;
 
     if (!query) {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'البحث فارغ' });
@@ -226,7 +215,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const cachedData = cache.match(cacheKey);
 
     if (cachedData) {
-      return res.status(200).setHeader('X-Cache-Status', 'HIT').json(cachedData);
+      return res.status(200).set('X-Cache-Status', 'HIT').json(cachedData);
     }
 
     let names = [];
@@ -291,7 +280,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     cache.put(cacheKey, finalResponseData);
     return res.status(200).json(finalResponseData);
 
-  } (e) {
+  } catch (e) {
     return res.status(500).json({ success: false, results: [], total: 0, error: e.message });
   }
 });
