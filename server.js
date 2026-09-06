@@ -156,8 +156,8 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
-// ⏱️ الـ Timeout (6 ثوانٍ لمنح متصفح ScrapingBee والبروكسي وقتاً كافياً للرد)
-async function fetchWithTimeout(url, options = {}, timeoutMs = 6000) {
+// ⏱️ رفع الـ Timeout إلى 10 ثوانٍ لمنح متصفح ScrapingBee والبروكسي وقتاً كافياً
+async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -230,11 +230,11 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'مفتاح ScrapingBee غير مضبوط' });
     }
 
-    // ⚡️ تفعيل render_js=true و premium_proxy=true لتجاوز الحماية وجلب النتائج بنجاح
-    const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(targetUrl)}&render_js=true&premium_proxy=true&headers=${encodeURIComponent(JSON.stringify({ 'referer': dynamicReferer }))}`;
+    // ⚡️ استخدام render_js=true و premium_proxy=true مع تحديد country_code=ye لتجاوز الحظر
+    const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(targetUrl)}&render_js=true&premium_proxy=true&country_code=ye&headers=${encodeURIComponent(JSON.stringify({ 'referer': dynamicReferer }))}`;
 
     try {
-      const response = await fetchWithTimeout(scrapingBeeUrl, { method: 'GET' }, 6000);
+      const response = await fetchWithTimeout(scrapingBeeUrl, { method: 'GET' }, 10000);
       if (response.ok) {
         const responseContent = await response.text();
         let extracted;
