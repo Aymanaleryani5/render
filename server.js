@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ==========================================================
-// 📊 نظام الكاش (Memory Cache) - مدة الكاش 2 يوم (48 ساعة)
+// 📊 نظام الكاش (Memory Cache) - مدة الكاش والفحص 2 يوم (48 ساعة)
 // ==========================================================
 class MemoryCache {
   constructor() {
@@ -49,6 +49,7 @@ const rateLimiter = rateLimit({
   }
 });
 
+const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "1432f28f4c66602b7020a6f1bf5fd9ba";
 const cache = new MemoryCache();
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
@@ -155,8 +156,8 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
-// ⏱️ Timeout سريع جداً بـ 3 ثوانٍ (3000ms) لأقصى سرعة استجابة
-async function fetchWithTimeout(url, options = {}, timeoutMs = 3000) {
+// ⏱️ الـ Timeout الافتراضي 7 ثوانٍ (7000ms)
+async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -170,7 +171,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 3000) {
 }
 
 // ==========================================================
-// 🚀 Endpoint الرئيسي (فائق السرعة)
+// 🚀 Endpoint الرئيسي
 // ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
@@ -213,7 +214,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = cache.match(cacheKey);
 
-    // إذا كان الرقم مخزناً في الكاش، يتم إرجاعه في أجزاء من الميلي ثانية (Instant)
     if (cachedData) {
       return res.status(200).set('X-Cache-Status', 'HIT').json(cachedData);
     }
@@ -226,17 +226,22 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const dynamicReferer = `https://ab.new9plus.com/calle/?res_id=K${base64Phone}%3D%3D`;
     const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}&nocache=${Date.now()}`;
 
-    // إعدادات اتصال مباشر سريعة جداً بدون وسيط
-    const directHeaders = {
+    const browserHeaders = {
       'accept': '*/*',
       'accept-language': 'ar,en;q=0.9',
       'referer': dynamicReferer,
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'x-requested-with': 'XMLHttpRequest'
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
     };
 
+    if (!SCRAPINGAPI_API_KEY) {
+      return res.status(200).json({ success: false, results: [], total: 0, error: 'مفتاح ScraperAPI غير مضبوط' });
+    }
+
+    // تم تغيير render=false إلى render=true هنا بناءً على طلبك
+    const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=true`;
+
     try {
-      const response = await fetchWithTimeout(targetUrl, { method: 'GET', headers: directHeaders }, 3000);
+      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 7000);
       if (response.ok) {
         const responseContent = await response.text();
         let extracted;
@@ -248,7 +253,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         if (extracted.length > 0) {
           names = extracted;
           success = true;
-          source = 'direct';
+          source = 'scrapingapi';
         }
       }
     } catch (e) {}
@@ -260,7 +265,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const results = names.map(name => ({
       name,
       phone: databasePhone,
-      source: 'Direct API',
+      source: 'ScrapingAPI',
       provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
@@ -273,7 +278,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       cached_at: new Date().toISOString()
     };
 
-    // تخزين النتيجة في الكاش للطلبات اللاحقة الفورية
     cache.put(cacheKey, finalResponseData);
     return res.status(200).json(finalResponseData);
 
