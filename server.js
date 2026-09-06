@@ -7,6 +7,9 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ضروري جداً على Render ليعمل الـ Rate Limit والـ IP الصحيح
+app.set('trust proxy', 1);
+
 // ==========================================================
 // 📊 نظام الكاش (Memory Cache) - مدة الكاش والفحص 2 يوم (48 ساعة)
 // ==========================================================
@@ -224,7 +227,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const base64Phone = Buffer.from(scrapePhone).toString('base64');
     const dynamicReferer = `https://ab.new9plus.com/calle/?res_id=K${base64Phone}%3D%3D`;
     
-    // تجربة استهداف الصفحة الرئيسية أولاً أو الرابط الفعلي بدلاً من الـ ajax المباشر إذا كان محجوباً
     const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}&nocache=${Date.now()}`;
 
     if (!SCRAPINGBEE_API_KEY || SCRAPINGBEE_API_KEY === "YOUR_SCRAPINGBEE_API_KEY") {
@@ -240,8 +242,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
       if (response.ok) {
         const responseContent = await response.text();
-        
-        // 🔍 طباعة المحتوى القادم من الموقع لنكتشف السبب (هل هو فارغ أم محظور؟)
         console.log(`📄 Response Content Preview:`, responseContent.substring(0, 300));
 
         let extracted;
@@ -286,7 +286,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     cache.put(cacheKey, finalResponseData);
     return res.status(200).json(finalResponseData);
 
-  }اجعل (e) {
+  } catch (e) {
     return res.status(500).json({ success: false, results: [], total: 0, error: e.message });
   }
 });
