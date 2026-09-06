@@ -49,7 +49,7 @@ const rateLimiter = rateLimit({
   }
 });
 
-const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "1432f28f4c66602b7020a6f1bf5fd9ba";
+const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY || "ITQDEUW9TBXX2N4LS3PVFU3YYG3J70HQ2ZR53S9O9ZATQCNFJ7QUN5JV8FSEPVG23J6BZMZOI8F0DVSH";
 const cache = new MemoryCache();
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
@@ -156,8 +156,8 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
-// ⏱️ الـ Timeout الافتراضي 7 ثوانٍ (7000ms)
-async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
+// ⏱️ الـ Timeout السريع (5 ثوانٍ لضمان سرعة الاستجابة)
+async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -226,21 +226,15 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const dynamicReferer = `https://ab.new9plus.com/calle/?res_id=K${base64Phone}%3D%3D`;
     const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}&nocache=${Date.now()}`;
 
-    const browserHeaders = {
-      'accept': '*/*',
-      'accept-language': 'ar,en;q=0.9',
-      'referer': dynamicReferer,
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
-    };
-
-    if (!SCRAPINGAPI_API_KEY) {
-      return res.status(200).json({ success: false, results: [], total: 0, error: 'مفتاح ScraperAPI غير مضبوط' });
+    if (!SCRAPINGBEE_API_KEY || SCRAPINGBEE_API_KEY === "YOUR_SCRAPINGBEE_API_KEY") {
+      return res.status(200).json({ success: false, results: [], total: 0, error: 'مفتاح ScrapingBee غير مضبوط' });
     }
 
-    const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
+    // ⚡️ تم تعيين render_js=false لتسريع جلب الطلب مباشرة دون تشغيل متصفح ثقيل
+    const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(targetUrl)}&render_js=false&headers=${encodeURIComponent(JSON.stringify({ 'referer': dynamicReferer }))}`;
 
     try {
-      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 7000);
+      const response = await fetchWithTimeout(scrapingBeeUrl, { method: 'GET' }, 5000);
       if (response.ok) {
         const responseContent = await response.text();
         let extracted;
@@ -252,7 +246,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         if (extracted.length > 0) {
           names = extracted;
           success = true;
-          source = 'scrapingapi';
+          source = 'scrapingbee';
         }
       }
     } catch (e) {}
@@ -264,7 +258,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const results = names.map(name => ({
       name,
       phone: databasePhone,
-      source: 'ScrapingAPI',
+      source: 'ScrapingBee',
       provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
