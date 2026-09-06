@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ==========================================================
-// 📊 نظام الكاش (Memory Cache) - مدة الكاش والفحص 2 يوم (48 ساعة)
+// 📊 نظام الكاش (Memory Cache) - مدة الكاش 2 يوم (48 ساعة)
 // ==========================================================
 class MemoryCache {
   constructor() {
@@ -49,8 +49,6 @@ const rateLimiter = rateLimit({
   }
 });
 
-// مفتاح ScrapingBee الخاص بك
-const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY || "ITQDEUW9TBXX2N4LS3PVFU3YYG3J70HQ2ZR53S9O9ZATQCNFJ7QUN5JV8FSEPVG23J6BZMZOI8F0DVSH";
 const cache = new MemoryCache();
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
@@ -157,8 +155,8 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
-// ⏱️ الـ Timeout الافتراضي 7 ثوانٍ (7000ms)
-async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
+// ⏱️ Timeout سريع جداً بـ 3 ثوانٍ (3000ms) لأقصى سرعة استجابة
+async function fetchWithTimeout(url, options = {}, timeoutMs = 3000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -172,7 +170,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
 }
 
 // ==========================================================
-// 🚀 Endpoint الرئيسي
+// 🚀 Endpoint الرئيسي (فائق السرعة)
 // ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
@@ -215,6 +213,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = cache.match(cacheKey);
 
+    // إذا كان الرقم مخزناً في الكاش، يتم إرجاعه في أجزاء من الميلي ثانية (Instant)
     if (cachedData) {
       return res.status(200).set('X-Cache-Status', 'HIT').json(cachedData);
     }
@@ -227,11 +226,17 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const dynamicReferer = `https://ab.new9plus.com/calle/?res_id=K${base64Phone}%3D%3D`;
     const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}&nocache=${Date.now()}`;
 
-    // رابط ScrapingBee مع تفعيل الـ Premium Proxy لتدوير الـ IPs وتجاوز قيود الموقع المستهدف
-    const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(targetUrl)}&render_js=false&premium_proxy=true`;
+    // إعدادات اتصال مباشر سريعة جداً بدون وسيط
+    const directHeaders = {
+      'accept': '*/*',
+      'accept-language': 'ar,en;q=0.9',
+      'referer': dynamicReferer,
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'x-requested-with': 'XMLHttpRequest'
+    };
 
     try {
-      const response = await fetchWithTimeout(scrapingBeeUrl, { method: 'GET' }, 7000);
+      const response = await fetchWithTimeout(targetUrl, { method: 'GET', headers: directHeaders }, 3000);
       if (response.ok) {
         const responseContent = await response.text();
         let extracted;
@@ -243,7 +248,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         if (extracted.length > 0) {
           names = extracted;
           success = true;
-          source = 'scrapingbee';
+          source = 'direct';
         }
       }
     } catch (e) {}
@@ -255,7 +260,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const results = names.map(name => ({
       name,
       phone: databasePhone,
-      source: 'ScrapingBee',
+      source: 'Direct API',
       provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
@@ -268,6 +273,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       cached_at: new Date().toISOString()
     };
 
+    // تخزين النتيجة في الكاش للطلبات اللاحقة الفورية
     cache.put(cacheKey, finalResponseData);
     return res.status(200).json(finalResponseData);
 
