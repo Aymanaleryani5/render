@@ -7,14 +7,26 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ==========================================================
+// 📊 نظام الكاش (Memory Cache) - مدة الكاش والفحص 2 يوم (48 ساعة)
+// ==========================================================
 class MemoryCache {
   constructor() {
     this.cache = new NodeCache({ stdTTL: 172800, checkperiod: 172800 });
   }
-  match(requestKey) { return this.cache.get(requestKey) || null; }
-  put(requestKey, responseData) { this.cache.set(requestKey, responseData); }
+
+  match(requestKey) {
+    return this.cache.get(requestKey) || null;
+  }
+
+  put(requestKey, responseData) {
+    this.cache.set(requestKey, responseData);
+  }
 }
 
+// ==========================================================
+// 📊 نظام تحديد المعدل (Rate Limiting)
+// ==========================================================
 const rateLimiter = rateLimit({
   windowMs: 3 * 1000,
   max: 1,
@@ -25,14 +37,19 @@ const rateLimiter = rateLimit({
     error: 'مهلاً! الرجاء الانتظار',
     message: '⏳ يرجى الانتظار 3 ثواني بين عمليات البحث'
   }),
-  keyGenerator: (req) => req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'anonymous',
+  keyGenerator: (req) => {
+    return req.headers['cf-connecting-ip'] ||
+           req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+           req.ip ||
+           'anonymous';
+  },
   handler: (req, res) => {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.status(429).send(rateLimiter.message);
   }
 });
 
-const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY || "ITQDEUW9TBXX2N4LS3PVFU3YYG3J70HQ2ZR53S9O9ZATQCNFJ7QUN5JV8FSEPVG23J6BZMZOI8F0DVSH";
+const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "1432f28f4c66602b7020a6f1bf5fd9ba";
 const cache = new MemoryCache();
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
@@ -40,17 +57,31 @@ app.use(express.json());
 
 app.get('/ping', (req, res) => res.status(200).send('OK'));
 
+// ==========================================================
+// 🌍 خريطة مفاتيح دول العالم
+// ==========================================================
 const COUNTRY_CODES = [
-  { code: '967', country: 'اليمن' }, { code: '966', country: 'السعودية' },
-  { code: '20', country: 'مصر' }, { code: '971', country: 'الإمارات' },
-  { code: '965', country: 'الكويت' }, { code: '968', country: 'عُمان' },
-  { code: '974', country: 'قطر' }, { code: '973', country: 'البحرين' },
-  { code: '962', country: 'الأردن' }, { code: '961', country: 'لبنان' },
-  { code: '963', country: 'سوريا' }, { code: '964', country: 'العراق' },
-  { code: '970', country: 'فلسطين' }, { code: '212', country: 'المغرب' },
-  { code: '213', country: 'الجزائر' }, { code: '216', country: 'تونس' },
-  { code: '218', country: 'ليبيا' }, { code: '249', country: 'السودان' },
-  { code: '1', country: 'أمريكا / كندا' }, { code: '44', country: 'بريطانيا' }, { code: '90', country: 'تركيا' }
+  { code: '967', country: 'اليمن' },
+  { code: '966', country: 'السعودية' },
+  { code: '20', country: 'مصر' },
+  { code: '971', country: 'الإمارات' },
+  { code: '965', country: 'الكويت' },
+  { code: '968', country: 'عُمان' },
+  { code: '974', country: 'قطر' },
+  { code: '973', country: 'البحرين' },
+  { code: '962', country: 'الأردن' },
+  { code: '961', country: 'لبنان' },
+  { code: '963', country: 'سوريا' },
+  { code: '964', country: 'العراق' },
+  { code: '970', country: 'فلسطين' },
+  { code: '212', country: 'المغرب' },
+  { code: '213', country: 'الجزائر' },
+  { code: '216', country: 'تونس' },
+  { code: '218', country: 'ليبيا' },
+  { code: '249', country: 'السودان' },
+  { code: '1', country: 'أمريكا / كندا' },
+  { code: '44', country: 'بريطانيا' },
+  { code: '90', country: 'تركيا' }
 ];
 
 const STOP_WORDS = new Set([
@@ -86,6 +117,7 @@ function extractNamesFromJSON(jsonData) {
         let name = cleanExtractedName(fameMatch[1]);
         if (isRealName(name)) names.add(name);
       }
+
       const numberedMatches = text.matchAll(/\d+\s*[-–—]\s*([^\d\n]+)/g);
       for (const match of numberedMatches) {
         let name = cleanExtractedName(match[1]);
@@ -114,13 +146,18 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
     if (/^(70)[0-9]{7}$/.test(cleanPhoneYemen)) return 'واي';
     return 'اليمن';
   }
+
   for (const item of COUNTRY_CODES) {
-    if (fullPhone.startsWith(item.code)) return item.country;
+    if (fullPhone.startsWith(item.code)) {
+      return item.country;
+    }
   }
+
   return 'رقم دولي';
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+// ⏱️ الـ Timeout الافتراضي 7 ثوانٍ (7000ms)
+async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -133,17 +170,26 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
   }
 }
 
+// ==========================================================
+// 🚀 Endpoint الرئيسي
+// ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
     const query = req.method === 'GET' ? req.query.query : req.body.query;
+
     if (!query) {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'البحث فارغ' });
     }
 
     let rawDigits = String(query).replace(/\D/g, '');
-    if (rawDigits.startsWith('00')) rawDigits = rawDigits.substring(2);
 
-    let provider = '', databasePhone = '', scrapePhone = '';
+    if (rawDigits.startsWith('00')) {
+      rawDigits = rawDigits.substring(2);
+    }
+
+    let provider = '';
+    let databasePhone = '';
+    let scrapePhone = '';
 
     if (rawDigits.startsWith('967')) {
       const cleanYemen = rawDigits.slice(-9);
@@ -167,24 +213,34 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = cache.match(cacheKey);
+
     if (cachedData) {
       return res.status(200).set('X-Cache-Status', 'HIT').json(cachedData);
     }
 
-    if (!SCRAPINGBEE_API_KEY) {
-      return res.status(200).json({ success: false, results: [], total: 0, error: 'مفتاح ScrapingBee غير مضبوط في البيئة' });
-    }
-
-    const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}&nocache=${Date.now()}`;
-    
-    // ضبط رابط ScrapingBee مع تفعيل render_js لتجاوز أي حماية ديناميكية
-    const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(targetUrl)}&render_js=true`;
-
     let names = [];
     let success = false;
+    let source = '';
+
+    const base64Phone = Buffer.from(scrapePhone).toString('base64');
+    const dynamicReferer = `https://ab.new9plus.com/calle/?res_id=K${base64Phone}%3D%3D`;
+    const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}&nocache=${Date.now()}`;
+
+    const browserHeaders = {
+      'accept': '*/*',
+      'accept-language': 'ar,en;q=0.9',
+      'referer': dynamicReferer,
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
+    };
+
+    if (!SCRAPINGAPI_API_KEY) {
+      return res.status(200).json({ success: false, results: [], total: 0, error: 'مفتاح ScraperAPI غير مضبوط' });
+    }
+
+    const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
 
     try {
-      const response = await fetchWithTimeout(scrapingBeeUrl, { method: 'GET' }, 12000);
+      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 7000);
       if (response.ok) {
         const responseContent = await response.text();
         let extracted;
@@ -196,20 +252,19 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         if (extracted.length > 0) {
           names = extracted;
           success = true;
+          source = 'scrapingapi';
         }
       }
-    } catch (e) {
-      console.error("ScrapingBee Error:", e.message);
-    }
+    } catch (e) {}
 
     if (!success || names.length === 0) {
-      return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج أو أن الخدمة استغرقت وقتاً طويلاً' });
+      return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
     }
 
     const results = names.map(name => ({
       name,
       phone: databasePhone,
-      source: 'ScrapingBee',
+      source: 'ScrapingAPI',
       provider,
       formattedDate: new Date().toLocaleDateString('ar-EG')
     }));
@@ -218,7 +273,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       success: true,
       results,
       total: results.length,
-      source: 'scrapingbee',
+      source,
       cached_at: new Date().toISOString()
     };
 
