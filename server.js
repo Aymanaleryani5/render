@@ -7,9 +7,6 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ضروري جداً على Render ليعمل الـ Rate Limit والـ IP الصحيح
-app.set('trust proxy', 1);
-
 // ==========================================================
 // 📊 نظام الكاش (Memory Cache) - مدة الكاش والفحص 2 يوم (48 ساعة)
 // ==========================================================
@@ -52,6 +49,7 @@ const rateLimiter = rateLimit({
   }
 });
 
+// مفتاح ScrapingBee الخاص بك
 const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY || "ITQDEUW9TBXX2N4LS3PVFU3YYG3J70HQ2ZR53S9O9ZATQCNFJ7QUN5JV8FSEPVG23J6BZMZOI8F0DVSH";
 const cache = new MemoryCache();
 
@@ -159,7 +157,8 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+// ⏱️ الـ Timeout الافتراضي 7 ثوانٍ (7000ms)
+async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -226,24 +225,15 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
     const base64Phone = Buffer.from(scrapePhone).toString('base64');
     const dynamicReferer = `https://ab.new9plus.com/calle/?res_id=K${base64Phone}%3D%3D`;
-    
     const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}&nocache=${Date.now()}`;
 
-    if (!SCRAPINGBEE_API_KEY || SCRAPINGBEE_API_KEY === "YOUR_SCRAPINGBEE_API_KEY") {
-      return res.status(200).json({ success: false, results: [], total: 0, error: 'مفتاح ScrapingBee غير مضبوط' });
-    }
-
-    const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(targetUrl)}&render_js=true&premium_proxy=true&country_code=ye&headers=${encodeURIComponent(JSON.stringify({ 'referer': dynamicReferer }))}`;
+    // رابط ScrapingBee مع تفعيل السرعة القصوى (render_js=false)
+    const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(targetUrl)}&render_js=false`;
 
     try {
-      const response = await fetchWithTimeout(scrapingBeeUrl, { method: 'GET' }, 12000);
-      
-      console.log(`📡 ScrapingBee Status for ${scrapePhone}:`, response.status);
-
+      const response = await fetchWithTimeout(scrapingBeeUrl, { method: 'GET' }, 7000);
       if (response.ok) {
         const responseContent = await response.text();
-        console.log(`📄 Response Content Preview:`, responseContent.substring(0, 300));
-
         let extracted;
         try {
           extracted = extractNamesFromJSON(JSON.parse(responseContent));
@@ -255,13 +245,8 @@ app.all('/api/search', rateLimiter, async (req, res) => {
           success = true;
           source = 'scrapingbee';
         }
-      } else {
-        const errText = await response.text();
-        console.log(`❌ ScrapingBee Error Body:`, errText);
       }
-    } catch (e) {
-      console.log(`⚠️ Fetch Exception:`, e.message);
-    }
+    } catch (e) {}
 
     if (!success || names.length === 0) {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
