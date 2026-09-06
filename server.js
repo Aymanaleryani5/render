@@ -7,16 +7,12 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// تفعيل ضغط الاستجابات لزيادة السرعة
-const compression = require('compression');
-app.use(compression());
-
 // ==========================================================
 // 📊 نظام الكاش (Memory Cache) - مدة الكاش 2 يوم (48 ساعة)
 // ==========================================================
 class MemoryCache {
   constructor() {
-    this.cache = new NodeCache({ stdTTL: 172800, checkperiod: 172800, useClones: false });
+    this.cache = new NodeCache({ stdTTL: 172800, checkperiod: 172800 });
   }
 
   match(requestKey) {
@@ -91,59 +87,40 @@ const STOP_WORDS = new Set([
   'صحيح', 'صحيحة', 'خطأ', 'نعم', 'لا', 'بحث', 'نتائج', 'البحث', 'للرقم',
   'اسم', 'الشهرة', 'السجلات', 'المكتشفة', 'الأكثر', 'شيوعاً', 'شيوعا', 'اليمن',
   'سجل', 'تفاصيل', 'بيانات', 'عفواً', 'تأكيد', 'الرقم', 'يرجى', 'الانتظار',
-  'null', 'undefined', 'info', 'country', 'search', 'phone', 'true', 'false',
-  'HTML', 'body', 'div', 'span', 'class', 'admin'
+  'null', 'undefined', 'info', 'country', 'search', 'phone', 'true', 'false'
 ]);
 
 function isRealName(name) {
-  if (!name || name.length < 2) return false;
+  if (!name || name.length < 3) return false;
   if (/^\+?\d+$/.test(name)) return false;
   if (STOP_WORDS.has(name.trim())) return false;
-  // التأكد من أن النص يحتوي على حروف عربية أو أنجليزية صحيحة
   return /[\u0600-\u06FFa-zA-Z]/.test(name);
 }
 
 function cleanExtractedName(name) {
   if (!name) return '';
   return name
-    .replace(/<[^>]*>?/gm, '') // إزالة وسوم الـ HTML إن وجدت
-    .replace(/[\\{}{}\[\]"':\-_,\/|\.]/g, ' ')
+    .replace(/عدد\s*السجلات\s*المكتشفة|هذا\s*الاسم\s*هو\s*الأكثر\s*شيوعاً\s*لهذا\s*الرقم|نتائج\s*البحث\s*للرقم|[\\{}{}\[\]"':\-_,\/|\.]/gi, ' ')
     .replace(/\b(عدد|السجلات|المكتشفة|الأكثر|شيوعا|شيوعاً|لهذا|الرقم|يرجى|الانتظار|البحث|نتائج|اسم|الشهرة|هاتف|ثابت)\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-// دالة محسنة لاستخراج أكبر عدد ممكن من الأسماء من استجابة الموقع (JSON أو نص)
 function extractNamesFromJSON(jsonData) {
   const names = new Set();
   try {
-    let text = '';
-    if (typeof jsonData === 'string') {
-      text = jsonData;
-    } else if (jsonData.result) {
-      text = typeof jsonData.result === 'string' ? jsonData.result : JSON.stringify(jsonData.result);
-    } else {
-      text = JSON.stringify(jsonData);
-    }
-
+    const text = typeof jsonData === 'string' ? jsonData : (jsonData.result || JSON.stringify(jsonData));
     if (text) {
-      // 1. استخراج النصوص التي تتبع الأرقام أو الشرطات
-      const patternMatches = text.matchAll(/(?:\d+[\s\-–—\:\.]+|اسم الشهرة[:\s]*)([^\n\r,\{\}\[\]"']+)/g);
-      for (const match of patternMatches) {
-        let name = cleanExtractedName(match[1]);
+      const fameMatch = text.match(/اسم الشهرة[:\s]+([^\n]+)/);
+      if (fameMatch) {
+        let name = cleanExtractedName(fameMatch[1]);
         if (isRealName(name)) names.add(name);
       }
 
-      // 2. البحث عن أي أسطر أو نصوص قد تحتوي على أسماء عربية صريحة
-      const words = text.split(/[\n\r,\t"']+/);
-      for (const w of words) {
-        let cleaned = cleanExtractedName(w);
-        if (isRealName(cleaned) && cleaned.split(' ').length >= 1) {
-          // نتأكد ألا تكون كلمة عشوائية قصيرة جداً أو رمز
-          if (cleaned.length >= 3) {
-            names.add(cleaned);
-          }
-        }
+      const numberedMatches = text.matchAll(/\d+\s*[-–—]\s*([^\d\n]+)/g);
+      for (const match of numberedMatches) {
+        let name = cleanExtractedName(match[1]);
+        if (isRealName(name)) names.add(name);
       }
     }
   } catch (e) {}
@@ -152,9 +129,9 @@ function extractNamesFromJSON(jsonData) {
 
 function extractNamesFromResponse(html) {
   const names = new Set();
-  const matches = html.matchAll(/(?:\d+[\s\-–—\:\.]+|اسم الشهرة[:\s]*)([^\n\r<]+)/g);
-  for (const match of matches) {
-    let name = cleanExtractedName(match[1]);
+  const numberedMatches = html.matchAll(/(\d+)\s*[-–—]\s*([^\d\n<]+)/g);
+  for (const match of numberedMatches) {
+    let name = cleanExtractedName(match[2]);
     if (isRealName(name)) names.add(name);
   }
   return Array.from(names).slice(0, 200);
@@ -178,6 +155,7 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
+// ⏱️ Timeout سريع جداً بـ 3 ثوانٍ (3000ms) لأقصى سرعة استجابة
 async function fetchWithTimeout(url, options = {}, timeoutMs = 3000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -192,7 +170,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 3000) {
 }
 
 // ==========================================================
-// 🚀 Endpoint الرئيسي
+// 🚀 Endpoint الرئيسي (فائق السرعة)
 // ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
@@ -235,6 +213,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = cache.match(cacheKey);
 
+    // إذا كان الرقم مخزناً في الكاش، يتم إرجاعه في أجزاء من الميلي ثانية (Instant)
     if (cachedData) {
       return res.status(200).set('X-Cache-Status', 'HIT').json(cachedData);
     }
@@ -247,13 +226,13 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const dynamicReferer = `https://ab.new9plus.com/calle/?res_id=K${base64Phone}%3D%3D`;
     const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}&nocache=${Date.now()}`;
 
+    // إعدادات اتصال مباشر سريعة جداً بدون وسيط
     const directHeaders = {
       'accept': '*/*',
       'accept-language': 'ar,en;q=0.9',
       'referer': dynamicReferer,
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'x-requested-with': 'XMLHttpRequest',
-      'connection': 'keep-alive'
+      'x-requested-with': 'XMLHttpRequest'
     };
 
     try {
@@ -294,6 +273,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       cached_at: new Date().toISOString()
     };
 
+    // تخزين النتيجة في الكاش للطلبات اللاحقة الفورية
     cache.put(cacheKey, finalResponseData);
     return res.status(200).json(finalResponseData);
 
@@ -304,11 +284,4 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
-
-  // 🔄 آلية الإيقاظ الذاتي (Self-Ping) لإبقاء السيرفر نشطاً على خطة Render المجانية
-  setInterval(async () => {
-    try {
-      await fetch(`http://127.0.0.1:${PORT}/ping`);
-    } catch (err) {}
-  }, 9 * 60 * 1000);
 });
