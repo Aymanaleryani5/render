@@ -3,12 +3,12 @@ const cors = require('cors');
 const NodeCache = require('node-cache');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
- 
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ==========================================================
-// 📊 نظام الكاش (Memory Cache) - مدة الكاش والفحص 2 يوم (48 ساعة)
+// 📊 نظام الكاش (Memory Cache) - مدة الكاش 48 ساعة
 // ==========================================================
 class MemoryCache {
   constructor() {
@@ -156,8 +156,8 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
-// ⏱️ الـ Timeout الافتراضي 7 ثوانٍ (7000ms)
-async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
+// ⏱️ تعديل الـ Timeout ليصبح ثانيتين (2000ms) كحد أقصى
+async function fetchWithTimeout(url, options = {}, timeoutMs = 2000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -214,8 +214,11 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = cache.match(cacheKey);
 
+    // إذا وجد في الكاش يتم إرجاعه فوراً
     if (cachedData) {
-      return res.status(200).set('X-Cache-Status', 'HIT').json(cachedData);
+      return res.status(200)
+        .setHeader('X-Cache-Status', 'HIT')
+        .json(cachedData);
     }
 
     let names = [];
@@ -240,7 +243,9 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
 
     try {
-      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 7000);
+      // محاولة الجلب خلال ثانيتين فقط
+      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 2000);
+
       if (response.ok) {
         const responseContent = await response.text();
         let extracted;
@@ -255,10 +260,13 @@ app.all('/api/search', rateLimiter, async (req, res) => {
           source = 'scrapingapi';
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      // إذا حدث Timeout (أكثر من ثانيتين) أو أي خطأ شبكة، سيتم تجاهله وإرجاع نتيجة فارغة أدناه
+    }
 
+    // إذا لم تتوافر النتائج خلال المهلة الزمنية، يتم إرجاع نتيجة فارغة فوراً دون تعليق السيرفر
     if (!success || names.length === 0) {
-      return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
+      return res.status(200).json({ success: false, results: [], total: 0, error: 'انتهت مهلة الانتظار أو لم يتم العثور على نتائج' });
     }
 
     const results = names.map(name => ({
@@ -278,10 +286,13 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     };
 
     cache.put(cacheKey, finalResponseData);
-    return res.status(200).json(finalResponseData);
+    
+    return res.status(200)
+      .setHeader('X-Cache-Status', 'MISS')
+      .json(finalResponseData);
 
   } catch (e) {
-    return res.status(500).json({ success: false, results: [], total: 0, error: e.message });
+    return res.status(200).json({ success: false, results: [], total: 0, error: e.message });
   }
 });
 
