@@ -156,8 +156,8 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
-// ⏱️ تعديل الـ Timeout ليصبح ثانيتين (2000ms) كحد أقصى
-async function fetchWithTimeout(url, options = {}, timeoutMs = 2000) {
+// ⏱️ الـ Timeout الافتراضي 7 ثوانٍ
+async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -214,7 +214,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const cacheKey = `phone_${databasePhone}`;
     const cachedData = cache.match(cacheKey);
 
-    // إذا وجد في الكاش يتم إرجاعه فوراً
     if (cachedData) {
       return res.status(200)
         .setHeader('X-Cache-Status', 'HIT')
@@ -243,8 +242,9 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
 
     try {
-      // محاولة الجلب خلال ثانيتين فقط
-      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 2000);
+      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 7000);
+      
+      console.log(`[ScraperAPI Response URL]: ${response.url}`);
 
       if (response.ok) {
         const responseContent = await response.text();
@@ -261,12 +261,11 @@ app.all('/api/search', rateLimiter, async (req, res) => {
         }
       }
     } catch (e) {
-      // إذا حدث Timeout (أكثر من ثانيتين) أو أي خطأ شبكة، سيتم تجاهله وإرجاع نتيجة فارغة أدناه
+      console.error(`[Fetch Error]: ${e.message}`);
     }
 
-    // إذا لم تتوافر النتائج خلال المهلة الزمنية، يتم إرجاع نتيجة فارغة فوراً دون تعليق السيرفر
     if (!success || names.length === 0) {
-      return res.status(200).json({ success: false, results: [], total: 0, error: 'انتهت مهلة الانتظار أو لم يتم العثور على نتائج' });
+      return res.status(200).json({ success: false, results: [], total: 0, error: 'لم يتم العثور على نتائج' });
     }
 
     const results = names.map(name => ({
@@ -292,7 +291,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       .json(finalResponseData);
 
   } catch (e) {
-    return res.status(200).json({ success: false, results: [], total: 0, error: e.message });
+    return res.status(500).json({ success: false, results: [], total: 0, error: e.message });
   }
 });
 
