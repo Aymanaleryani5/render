@@ -98,7 +98,8 @@ function isRealName(name) {
   return /[\u0600-\u06FFa-zA-Z]/.test(name);
 }
 
-function cleanExtractedName(name) {
+
+  function cleanExtractedName(name) {
   if (!name) return '';
   return name
     .replace(/عدد\s*السجلات\s*المكتشفة|هذا\s*الاسم\s*هو\s*الأكثر\s*شيوعاً\s*لهذا\s*الرقم|نتائج\s*البحث\s*للرقم|[\\{}{}\[\]"':\-_,\/|\.]/gi, ' ')
