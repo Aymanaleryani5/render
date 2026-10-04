@@ -57,9 +57,6 @@ app.use(express.json());
 
 app.get('/ping', (req, res) => res.status(200).send('OK'));
 
-// ==========================================================
-// 🌍 خريطة مفاتيح دول العالم
-// ==========================================================
 const COUNTRY_CODES = [
   { code: '967', country: 'اليمن' },
   { code: '966', country: 'السعودية' },
@@ -98,8 +95,7 @@ function isRealName(name) {
   return /[\u0600-\u06FFa-zA-Z]/.test(name);
 }
 
-
-  function cleanExtractedName(name) {
+function cleanExtractedName(name) {
   if (!name) return '';
   return name
     .replace(/عدد\s*السجلات\s*المكتشفة|هذا\s*الاسم\s*هو\s*الأكثر\s*شيوعاً\s*لهذا\s*الرقم|نتائج\s*البحث\s*للرقم|[\\{}{}\[\]"':\-_,\/|\.]/gi, ' ')
@@ -157,7 +153,7 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
-// ⏱️ الـ Timeout الافتراضي 7 ثوانٍ
+// ⏱️ الـ Timeout محدد بـ 7 ثوانٍ لضمان الموثوقية
 async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -171,9 +167,6 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
   }
 }
 
-// ==========================================================
-// 🚀 Endpoint الرئيسي
-// ==========================================================
 app.all('/api/search', rateLimiter, async (req, res) => {
   try {
     const query = req.method === 'GET' ? req.query.query : req.body.query;
@@ -227,7 +220,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
 
     const base64Phone = Buffer.from(scrapePhone).toString('base64');
     const dynamicReferer = `https://ab.new9plus.com/calle/?res_id=K${base64Phone}%3D%3D`;
-    const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}&nocache=${Date.now()}`;
+    const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}`;
 
     const browserHeaders = {
       'accept': '*/*',
@@ -240,12 +233,10 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'مفتاح ScraperAPI غير مضبوط' });
     }
 
-    const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
+    const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false&keep_alive=true`;
 
     try {
       const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 7000);
-      
-      console.log(`[ScraperAPI Response URL]: ${response.url}`);
 
       if (response.ok) {
         const responseContent = await response.text();
