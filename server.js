@@ -223,37 +223,50 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const targetUrl = `https://ab.new9plus.com/wp-admin/admin-ajax.php?action=alosh_search&phone=${scrapePhone}`;
 
     const browserHeaders = {
-      'accept': '*/*',
-      'accept-language': 'ar,en;q=0.9',
+      'accept': 'application/json, text/javascript, */*; q=0.01',
+      'accept-language': 'ar,en-US;q=0.9,en;q=0.8',
       'referer': dynamicReferer,
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
+      'x-requested-with': 'XMLHttpRequest',
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     };
 
     if (!SCRAPINGAPI_API_KEY) {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'مفتاح ScraperAPI غير مضبوط' });
     }
 
-    const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false&keep_alive=true`;
+    const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=true`;
 
     try {
+      console.log(`[DEBUG] Requesting URL: ${targetUrl}`);
       const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 7000);
+
+      console.log(`[DEBUG] ScraperAPI Response Status: ${response.status}`);
 
       if (response.ok) {
         const responseContent = await response.text();
-        let extracted;
+        console.log(`[DEBUG] Response Content Preview: ${responseContent.substring(0, 300)}`);
+
+        let extracted = [];
         try {
-          extracted = extractNamesFromJSON(JSON.parse(responseContent));
+          const parsedJson = JSON.parse(responseContent);
+          extracted = extractNamesFromJSON(parsedJson);
         } catch {
+          console.log(`[DEBUG] Not a direct JSON, trying HTML extraction...`);
           extracted = extractNamesFromResponse(responseContent);
         }
+
+        console.log(`[DEBUG] Extracted Names:`, extracted);
+
         if (extracted.length > 0) {
           names = extracted;
           success = true;
           source = 'scrapingapi';
         }
+      } else {
+        console.error(`[DEBUG] ScraperAPI returned error status: ${response.status}`);
       }
     } catch (e) {
-      console.error(`[Fetch Error]: ${e.message}`);
+      console.error(`[Fetch Error Catch]: ${e.message}`);
     }
 
     if (!success || names.length === 0) {
