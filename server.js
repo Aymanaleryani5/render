@@ -153,7 +153,7 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
-// ⏱️ الـ Timeout محدد بـ 12 ثانية لضمان الموثوقية
+// ⏱️ الـ Timeout محدد بـ 12 ثانية
 async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -236,7 +236,6 @@ app.all('/api/search', rateLimiter, async (req, res) => {
     const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false&keep_alive=true`;
 
     try {
-      // تم التعديل إلى 12000 مللي ثانية (12 ثانية)
       const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 12000);
 
       if (response.ok) {
