@@ -153,8 +153,8 @@ function detectProviderAndCountry(fullPhone, cleanPhoneYemen) {
   return 'رقم دولي';
 }
 
-// ⏱️ الـ Timeout محدد بـ 12 ثانية
-async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+// ⏱️ مهلة انتظار محسنة ومتوازنة للسرعة (8 ثوانٍ)
+async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -190,7 +190,7 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       provider = detectProviderAndCountry(rawDigits, cleanYemen);
       databasePhone = '0' + cleanYemen;
       scrapePhone = '967' + cleanYemen;
-    } else if (rawDigits.length === 9 && /^(77|78|73|71|70)/.test(rawDigits)) {
+    } else if (rawDigits.length === 9 && /^(77|78|73|71|70)/.test(rawDigits))  {
       provider = detectProviderAndCountry('', rawDigits);
       databasePhone = '0' + rawDigits;
       scrapePhone = '967' + rawDigits;
@@ -233,10 +233,11 @@ app.all('/api/search', rateLimiter, async (req, res) => {
       return res.status(200).json({ success: false, results: [], total: 0, error: 'مفتاح ScraperAPI غير مضبوط' });
     }
 
-    const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false&keep_alive=true`;
+    // تم ضبط الرابط ليكون أسرع عبر الاستغناء عن العوامل البطئية
+    const scrapingApiUrl = `https://api.scraperapi.com/?api_key=${SCRAPINGAPI_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
 
     try {
-      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 12000);
+      const response = await fetchWithTimeout(scrapingApiUrl, { method: 'GET', headers: browserHeaders }, 8000);
 
       if (response.ok) {
         const responseContent = await response.text();
