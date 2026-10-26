@@ -49,7 +49,7 @@ const rateLimiter = rateLimit({
   }
 });
 
-const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "d4e879edf0d0a0e14b55752628008b36";
+const SCRAPINGAPI_API_KEY = process.env.SCRAPINGAPI_API_KEY || "566c8b0b847b63a2f37a9611ad0cc59d";
 const cache = new MemoryCache();
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
